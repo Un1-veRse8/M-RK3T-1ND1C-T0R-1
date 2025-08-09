@@ -1,0 +1,14 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © gunnjac
+
+//@version=6
+//@version=5
+indicator(title="Log(OBV) Weighted Price", shorttitle="PW-logOBV", overlay=false)
+scaler = input.int(100)
+obv = 0.0
+price_change = (close - close[1])/ close[1]
+obv := close > close[1] ? nz(obv[1]) + math.log10(volume)*math.abs(scaler* price_change):
+       close < close[1] ? nz(obv[1]) - math.log10(volume)* math.abs(scaler* price_change) :
+       nz(obv[1])
+
+plot(obv, color=color.rgb(127, 1, 1), title="OBV", linewidth=2)

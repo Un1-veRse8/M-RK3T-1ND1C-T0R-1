@@ -1,0 +1,269 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Lyapunov Market Instability (LMI)", overlay=false)
+// ========================================
+// INPUTS
+// ========================================
+group_lyapunov = "📐 Lyapunov Parameters"
+dimension = input.int(3, "Embedding Dimension", minval=2, maxval=5, group=group_lyapunov, tooltip="Dimension of phase space reconstruction.\n\n• 2-3: Simple dynamics (recommended for crypto/forex)\n• 4-5: Complex dynamics (stocks/indices)\n\nHigher dimensions capture more complex patterns but need more data")
+tau = input.int(1, "Time Delay (τ)", minval=1, maxval=5, group=group_lyapunov, tooltip="Lag between phase space coordinates.\n\n• 1: High-frequency analysis (1m-15m charts)\n• 2-3: Medium frequency (1H-4H charts)\n• 4-5: Low frequency (Daily+ charts)\n\nMatch to your timeframe's natural cycle")
+epsilon = input.float(0.001, "Initial Separation (ε)", minval=0.0001, maxval=0.01, step=0.0001, group=group_lyapunov, tooltip="Size of perturbation for chaos detection.\n\n• 0.0001-0.0005: Highly liquid markets (major forex)\n• 0.0005-0.002: Normal markets (large cap stocks)\n• 0.002-0.01: Volatile markets (crypto, small caps)\n\nSmaller = more sensitive to chaos")
+evolution_steps = input.int(10, "Evolution Steps", minval=5, maxval=30, group=group_lyapunov, tooltip="How far to track trajectory divergence.\n\n• 5-10: Fast signals (scalping)\n• 10-20: Balanced (day trading)\n• 20-30: Slow signals (swing trading)\n\nMore steps = more reliable but lagging signals")
+group_signals = "📊 Signal Parameters"
+chaos_threshold = input.float(0.05, "Chaos Threshold", minval=0.01, maxval=0.2, step=0.01, group=group_signals, tooltip="Lyapunov value above which market is chaotic.\n\n• 0.01-0.03: Sensitive (more chaos signals)\n• 0.05: Balanced (recommended)\n• 0.1-0.2: Conservative (fewer signals)\n\nIn chaos: Follow trends, use breakouts")
+stability_threshold = input.float(-0.05, "Stability Threshold", minval=-0.2, maxval=-0.01, step=0.01, group=group_signals, tooltip="Lyapunov value below which market is stable.\n\n• -0.01 to -0.03: Sensitive (more stability signals)\n• -0.05: Balanced (recommended)\n• -0.1 to -0.2: Conservative (fewer signals)\n\nIn stability: Fade extremes, mean revert")
+signal_smoothing = input.int(3, "Signal Smoothing", minval=1, maxval=10, group=group_signals, tooltip="EMA period for Lyapunov smoothing.\n\n• 1-2: Raw signals (experienced traders)\n• 3-5: Balanced (recommended)\n• 6-10: Very smooth (position traders)\n\nHigher = fewer false signals but more lag")
+
+group_visual = "🎨 Rothko Visualization"
+color_mode = input.string("Rothko Classic", "Color Theme", options=["Rothko Classic", "Rothko Orange/Red", "Rothko Blue/Black", "Rothko Purple/Grey"], group=group_visual, tooltip="Visual theme inspired by Mark Rothko paintings.\n\n• Classic: Red chaos, blue stability\n• Orange/Red: Warm tones throughout\n• Blue/Black: Cool, meditative palette\n• Purple/Grey: Subtle, sophisticated")
+show_zones = input.bool(true, "Show Market Zones", group=group_visual, tooltip="Display background zones for market states.\n\n• Red zone: Chaotic (trending)\n• Gray zone: Transitioning\n• Blue zone: Stable (ranging)")
+show_transitions = input.bool(true, "Show Transitions", group=group_visual, tooltip="Mark state transitions with arrows.\n\n• Up arrow: Entering chaos (start trend following)\n• Down arrow: Entering stability (start mean reversion)")
+show_divergence = input.bool(true, "Show Divergence Signals", group=group_visual, tooltip="Detect price/Lyapunov divergences.\n\n• Bullish: Price low but Lyapunov rising\n• Bearish: Price high but Lyapunov falling\n\nBest in transition zones")
+show_dashboard = input.bool(true, "Show Dashboard", group=group_visual, tooltip="Display real-time market state dashboard with trading signals")
+show_guide = input.bool(true, "Show Guide", group=group_visual, tooltip="Display information guide explaining Lyapunov theory and usage")
+
+// ========================================
+// SIMPLIFIED LYAPUNOV CALCULATION
+// ========================================
+
+// Calculate price returns
+returns = (close - close[1]) / close[1]
+
+// Rolling window statistics
+window_size = dimension * tau + evolution_steps
+mean_return = ta.sma(returns, window_size)
+std_return = ta.stdev(returns, window_size)
+
+// Simplified Lyapunov approximation using divergence of returns
+calculate_simplified_lyapunov() =>
+    divergence_sum = 0.0
+    count = 0
+    
+    // Look at how small perturbations grow
+    for i = 1 to evolution_steps
+        if i < bar_index
+            // Current trajectory
+            current_return = returns[0]
+            historical_return = returns[i]
+            
+            // Find similar historical points
+            for j = evolution_steps to window_size
+                if j < bar_index
+                    hist_point = returns[j]
+                    
+                    // If historically similar to current
+                    if math.abs(hist_point - current_return) < epsilon
+                        // How did it evolve?
+                        future_point = returns[j - i]
+                        current_evolution = returns[i]
+                        
+                        // Measure divergence
+                        initial_sep = math.abs(hist_point - current_return)
+                        final_sep = math.abs(future_point - current_evolution)
+                        
+                        if initial_sep > 0 and final_sep > 0
+                            div_rate = math.log(final_sep / initial_sep) / i
+                            divergence_sum += div_rate
+                            count += 1
+    
+    count > 0 ? divergence_sum / count : 0.0
+
+// Calculate and smooth
+lyapunov_raw = calculate_simplified_lyapunov()
+lyapunov = ta.ema(lyapunov_raw, signal_smoothing)
+
+// Normalize to -1 to 1 range for better visualization
+lyapunov_normalized = math.max(-1, math.min(1, lyapunov * 10))
+
+// ========================================
+// MARKET STATE DETECTION
+// ========================================
+
+// Define market states
+is_chaotic = lyapunov > chaos_threshold
+is_stable = lyapunov < stability_threshold
+is_transitioning = not is_chaotic and not is_stable
+
+// State changes
+chaos_entry = ta.crossover(lyapunov, chaos_threshold)
+chaos_exit = ta.crossunder(lyapunov, chaos_threshold)
+stability_entry = ta.crossunder(lyapunov, stability_threshold)
+stability_exit = ta.crossover(lyapunov, stability_threshold)
+
+// Trend detection in chaotic state
+trend_up = is_chaotic and close > ta.sma(close, 20)
+trend_down = is_chaotic and close < ta.sma(close, 20)
+
+// Range detection in stable state
+range_bound = is_stable and ta.stdev(close, 20) < ta.sma(ta.stdev(close, 20), 50)
+
+// ========================================
+// DIVERGENCE DETECTION
+// ========================================
+
+// Price vs Lyapunov divergence
+price_high = ta.highest(high, 20)
+price_low = ta.lowest(low, 20)
+lyap_high = ta.highest(lyapunov, 20)
+lyap_low = ta.lowest(lyapunov, 20)
+
+bullish_div = close == price_low and lyapunov > lyap_low[1]
+bearish_div = close == price_high and lyapunov < lyap_high[1]
+
+// ========================================
+// ROTHKO COLOR FUNCTIONS
+// ========================================
+
+get_state_color(state_value, intensity) =>
+    if color_mode == "Rothko Classic"
+        if state_value > chaos_threshold
+            color.from_gradient(intensity, 0, 1, color.rgb(178, 34, 34), color.rgb(255, 0, 0))
+        else if state_value < stability_threshold
+            color.from_gradient(intensity, 0, 1, color.rgb(0, 0, 139), color.rgb(25, 25, 112))
+        else
+            color.from_gradient(intensity, 0, 1, color.rgb(105, 105, 105), color.rgb(169, 169, 169))
+    else if color_mode == "Rothko Orange/Red"
+        if state_value > chaos_threshold
+            color.rgb(255, 69, 0)
+        else if state_value < stability_threshold
+            color.rgb(255, 140, 0)
+        else
+            color.rgb(255, 165, 0)
+    else if color_mode == "Rothko Blue/Black"
+        if state_value > chaos_threshold
+            color.rgb(0, 0, 0)
+        else if state_value < stability_threshold
+            color.rgb(0, 0, 139)
+        else
+            color.rgb(70, 130, 180)
+    else // Purple/Grey
+        if state_value > chaos_threshold
+            color.rgb(128, 0, 128)
+        else if state_value < stability_threshold
+            color.rgb(75, 0, 130)
+        else
+            color.rgb(147, 112, 219)
+
+// ========================================
+// VISUALIZATION
+// ========================================
+
+// Background
+bgcolor(color.new(color.black, 95))
+
+// Create zones
+h1 = hline(1, color=na)
+h_chaos = hline(chaos_threshold, color=na)
+h0 = hline(0, color=na)
+h_stable = hline(stability_threshold, color=na)
+h_neg1 = hline(-1, color=na)
+
+// Market state zones (moved to global scope)
+fill(h_chaos, h1, color=show_zones ? color.new(color.red, 95) : na, title="Chaos Zone")
+fill(h_stable, h_chaos, color=show_zones ? color.new(color.gray, 95) : na, title="Transition Zone")
+fill(h_neg1, h_stable, color=show_zones ? color.new(color.blue, 95) : na, title="Stability Zone")
+
+// Main Lyapunov line
+line_color = get_state_color(lyapunov, math.abs(lyapunov_normalized))
+plot(lyapunov_normalized, "Lyapunov Exponent", color=line_color, linewidth=3)
+
+// State transitions (moved to global scope)
+plotshape(show_transitions and chaos_entry ? lyapunov_normalized : na, "Chaos Entry", shape.triangleup, location.absolute, color.new(color.red, 0), size=size.small)
+plotshape(show_transitions and stability_entry ? lyapunov_normalized : na, "Stability Entry", shape.triangledown, location.absolute, color.new(color.blue, 0), size=size.small)
+
+// Divergence signals (moved to global scope)
+plotshape(show_divergence and bullish_div ? -0.8 : na, "Bullish Divergence", shape.labelup, location.absolute, color.new(color.green, 0), size=size.tiny, text="Bull Div")
+plotshape(show_divergence and bearish_div ? 0.8 : na, "Bearish Divergence", shape.labeldown, location.absolute, color.new(color.red, 0), size=size.tiny, text="Bear Div")
+
+// Reference lines
+hline(0, "Neutral", color.new(color.white, 90), linewidth=1)
+hline(chaos_threshold, "Chaos Threshold", color.new(color.red, 80), linewidth=1, linestyle=hline.style_dotted)
+hline(stability_threshold, "Stability Threshold", color.new(color.blue, 80), linewidth=1, linestyle=hline.style_dotted)
+
+// Calculate bars since transitions (moved to global scope)
+bars_since_chaos = ta.barssince(chaos_entry)
+bars_since_stable = ta.barssince(stability_entry)
+
+// ========================================
+// DASHBOARD
+// ========================================
+
+var table dashboard = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 85))
+
+if barstate.islast and show_dashboard
+    // Spacer rows at top
+    table.cell(dashboard, 0, 0, "", text_size=size.tiny)
+    table.cell(dashboard, 1, 0, "", text_size=size.tiny)
+    table.cell(dashboard, 0, 1, "", text_size=size.tiny)
+    table.cell(dashboard, 1, 1, "", text_size=size.tiny)
+    
+    // Current state
+    state = is_chaotic ? "🔥 CHAOTIC" : is_stable ? "🧊 STABLE" : "⚡ TRANSITIONING"
+    state_color = is_chaotic ? color.red : is_stable ? color.blue : color.yellow
+    
+    table.cell(dashboard, 0, 2, "Market State", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 2, state, text_color=state_color, text_size=size.normal)
+    
+    // Trading bias
+    bias = is_chaotic ? (trend_up ? "📈 TREND UP" : trend_down ? "📉 TREND DOWN" : "❓ UNCLEAR") : is_stable ? (range_bound ? "📊 RANGE BOUND" : "🎯 MEAN REVERT") : "⏸️ WAIT"
+    
+    table.cell(dashboard, 0, 3, "Trading Bias", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 3, bias, text_color=color.white, text_size=size.small)
+    
+    // Lyapunov value
+    table.cell(dashboard, 0, 4, "Lyapunov λ", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 4, str.tostring(lyapunov, "#.####"), text_color=line_color, text_size=size.small)
+    
+    // Signal strength
+    signal_strength = is_chaotic ? "Strong Trend" : is_stable ? "Strong Range" : "Weak"
+    table.cell(dashboard, 0, 5, "Signal", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 5, signal_strength, text_color=color.white, text_size=size.small)
+    
+    // Recent transitions
+    recent_transition = bars_since_chaos < bars_since_stable ? "→ Chaos " + str.tostring(bars_since_chaos) + " bars ago" : "→ Stable " + str.tostring(bars_since_stable) + " bars ago"
+    
+    table.cell(dashboard, 0, 6, "Last Change", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 6, recent_transition, text_color=color.white, text_size=size.small)
+    
+    // Action
+    action = chaos_entry ? "🚀 FOLLOW BREAKOUTS" : stability_entry ? "🎯 FADE EXTREMES" : is_transitioning ? "⏸️ WAIT FOR SIGNAL" : "HOLD"
+    table.cell(dashboard, 0, 7, "Action", text_color=color.gray, text_size=size.small)
+    table.cell(dashboard, 1, 7, action, text_color=color.yellow, text_size=size.small)
+
+// ========================================
+// INFORMATION GUIDE
+// ========================================
+
+var table guide = table.new(position.bottom_left, 1, 1, bgcolor=color.new(#000000, 90), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast and show_guide
+    guide_text = "📐 Lyapunov Market Instability:\n━━━━━━━━━━━━━━━━━━━━\n" +
+                 "λ > " + str.tostring(chaos_threshold, "#.##") + " = CHAOS (Trending)\n" +
+                 "λ < " + str.tostring(stability_threshold, "#.##") + " = STABLE (Ranging)\n" +
+                 "Between = TRANSITION\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "🔥 Chaos Theory Applied:\n" +
+                 "• Positive λ = Trajectories diverge\n" +
+                 "• Negative λ = Trajectories converge\n" +
+                 "• Measures sensitivity to initial conditions\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "📊 Trading Strategy:\n" +
+                 "CHAOS → Follow trends, breakouts\n" +
+                 "STABLE → Fade extremes, mean revert\n" +
+                 "TRANSITION → Wait for confirmation\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "🎨 Rothko-inspired visualization\n" +
+                 "represents market energy states"
+    
+    table.cell(guide, 0, 0, guide_text, text_color=color.new(color.white, 20), text_size=size.tiny, text_halign=text.align_left, text_font_family=font.family_monospace)
+
+// ========================================
+// ALERTS
+// ========================================
+
+alertcondition(chaos_entry, "Chaos Entry", "Market entering chaotic state - Follow trends!")
+alertcondition(stability_entry, "Stability Entry", "Market entering stable state - Fade extremes!")
+alertcondition(bullish_div, "Bullish Divergence", "Bullish divergence detected")
+alertcondition(bearish_div, "Bearish Divergence", "Bearish divergence detected")

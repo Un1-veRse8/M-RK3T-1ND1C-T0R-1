@@ -1,0 +1,53 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// @ Julien_Eche
+
+//@version=6
+indicator('Hull Moving Average Adaptive RSI (Ehlers)', shorttitle = 'HMA RSI', overlay = true)
+
+// Inputs and adaptive RSI calculation
+src = input(close, 'Source')
+inst_period = ta.ema(0.33 * (360 / (math.abs(ta.atr(1)) + 0.00001)), 50)
+period_val = ta.ema(inst_period, 10)
+length = math.max(5, math.min(30, math.round(period_val / 2)))
+
+var float avgGain = na
+var float avgLoss = na
+
+gain = math.max(0, src - src[1])
+loss = math.max(0, src[1] - src)
+
+avgGain := na(avgGain) ? gain : (avgGain * (length - 1) + gain) / length
+avgLoss := na(avgLoss) ? loss : (avgLoss * (length - 1) + loss) / length
+
+rs = avgLoss == 0 ? 100.0 : avgGain / avgLoss
+adaptive_rsi = avgLoss == 0 ? 100.0 : 100 - 100 / (1 + rs)
+
+// HMA calculation
+hma_length = input(21, 'HMA Length')
+hma = ta.wma(2 * ta.wma(src, hma_length / 2) - ta.wma(src, hma_length), math.round(math.sqrt(hma_length)))
+
+// Define RGB values for colors
+r_high = 255
+g_high = 70
+b_high = 70
+r_mid = 170
+g_mid = 170
+b_mid = 170
+r_low = 70
+g_low = 130
+b_low = 255
+
+// Normalize RSI between -1 and +1 scale
+colorRatio = (adaptive_rsi - 50) / 15 // Centered at 50, ranging from -1 (bearish) to +1 (bullish)
+colorRatio := math.max(-1, math.min(1, colorRatio)) // Clamp between -1 and +1
+
+// Interpolate RGB components
+r = colorRatio > 0 ? r_mid + (r_high - r_mid) * colorRatio : r_mid + (r_low - r_mid) * math.abs(colorRatio)
+g = colorRatio > 0 ? g_mid + (g_high - g_mid) * colorRatio : g_mid + (g_low - g_mid) * math.abs(colorRatio)
+b = colorRatio > 0 ? b_mid + (b_high - b_mid) * colorRatio : b_mid + (b_low - b_mid) * math.abs(colorRatio)
+
+// Construct dynamic color
+hma_color = color.rgb(math.round(r), math.round(g), math.round(b))
+
+// Plot HMA with dynamic gradient color
+plot(hma, title = 'HMA Colored by Adaptive RSI', color = hma_color, linewidth = 2)

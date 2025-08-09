@@ -1,0 +1,125 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © sebamarghella
+
+//@version=5
+indicator("Hourly Volatility Explorer", overlay=true)
+
+// Input for selecting timezone
+var string TZ_GMT = "GMT"
+var string TZ_EST = "EST (UTC-5)"
+var string TZ_BST = "BST (UTC+1)"
+var string TZ_JST = "JST (UTC+9)"
+var string TZ_AEST = "AEST (UTC+10)"
+
+i_timezone = input.string(TZ_GMT, "Time Zone", options=[TZ_GMT, TZ_EST, TZ_BST, TZ_JST, TZ_AEST])
+i_lookback = input.int(30, "Lookback Period (Days)", minval=1, maxval=90)
+
+// Function to calculate range in pips
+f_pipRange() =>
+    (high - low) * 10
+
+// Function to get adjusted hour based on timezone
+f_getAdjustedHour(hour) =>
+    int offset = switch i_timezone
+        TZ_GMT  => 0
+        TZ_EST  => -5
+        TZ_BST  => 1
+        TZ_JST  => 9
+        TZ_AEST => 10
+        => 0
+    
+    adjustedHour = (hour + offset) % 24
+    adjustedHour < 0 ? adjustedHour + 24 : adjustedHour
+
+// Initialize arrays for each hour
+var float[] hourlyRanges = array.new_float(24, 0.0)
+var float[] hourlySum = array.new_float(24, 0.0)
+var int[] hourlyCounts = array.new_int(24, 0)
+
+// Get current hour adjusted for timezone
+currentHour = f_getAdjustedHour(hour)
+
+// Update hourly data
+if barstate.islast
+    for i = 0 to 23
+        array.set(hourlyRanges, i, array.get(hourlySum, i) / math.max(array.get(hourlyCounts, i), 1))
+
+// Calculate and store hourly range
+pipRange = f_pipRange()
+if not na(pipRange)
+    array.set(hourlySum, currentHour, array.get(hourlySum, currentHour) + pipRange)
+    array.set(hourlyCounts, currentHour, array.get(hourlyCounts, currentHour) + 1)
+
+// Plot hourly ranges
+plot(array.get(hourlyRanges, 0), title='Hour 00', color=color.from_gradient(0, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 1), title='Hour 01', color=color.from_gradient(1, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 2), title='Hour 02', color=color.from_gradient(2, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 3), title='Hour 03', color=color.from_gradient(3, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 4), title='Hour 04', color=color.from_gradient(4, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 5), title='Hour 05', color=color.from_gradient(5, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 6), title='Hour 06', color=color.from_gradient(6, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 7), title='Hour 07', color=color.from_gradient(7, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 8), title='Hour 08', color=color.from_gradient(8, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 9), title='Hour 09', color=color.from_gradient(9, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 10), title='Hour 10', color=color.from_gradient(10, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 11), title='Hour 11', color=color.from_gradient(11, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 12), title='Hour 12', color=color.from_gradient(12, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 13), title='Hour 13', color=color.from_gradient(13, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 14), title='Hour 14', color=color.from_gradient(14, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 15), title='Hour 15', color=color.from_gradient(15, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 16), title='Hour 16', color=color.from_gradient(16, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 17), title='Hour 17', color=color.from_gradient(17, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 18), title='Hour 18', color=color.from_gradient(18, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 19), title='Hour 19', color=color.from_gradient(19, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 20), title='Hour 20', color=color.from_gradient(20, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 21), title='Hour 21', color=color.from_gradient(21, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 22), title='Hour 22', color=color.from_gradient(22, 0, 23, color.blue, color.red), style=plot.style_columns)
+plot(array.get(hourlyRanges, 23), title='Hour 23', color=color.from_gradient(23, 0, 23, color.blue, color.red), style=plot.style_columns)
+
+
+// Create detailed table with correct dimensions
+var table volatilityTable = table.new(position.top_right, 3, 25, border_width=1)
+
+// Update table with current values
+if barstate.islast
+    // Header row
+    table.cell(volatilityTable, 0, 0, "Hour (" + i_timezone + ")", bgcolor=color.gray, text_color=color.white)
+    table.cell(volatilityTable, 1, 0, "Avg Range (pips)", bgcolor=color.gray, text_color=color.white)
+    table.cell(volatilityTable, 2, 0, "Samples", bgcolor=color.gray, text_color=color.white)
+    
+    // Data rows
+    var int maxHour = 0
+    var float maxRange = 0.0
+    
+    for i = 0 to 23
+        hourRange = array.get(hourlyRanges, i)
+        if hourRange > maxRange
+            maxRange := hourRange
+            maxHour := i
+            
+        bgcolor = color.from_gradient(i, 0, 23, color.new(color.blue, 70), color.new(color.red, 70))
+        
+        // Note: i + 1 for row position since row 0 is the header
+        table.cell(volatilityTable, 0, i + 1, str.tostring(i) + ":00", 
+                  bgcolor=bgcolor, 
+                  text_color=color.white)
+        
+        table.cell(volatilityTable, 1, i + 1, str.tostring(hourRange, "#.0"), 
+                  bgcolor=bgcolor, 
+                  text_color=color.white)
+        
+        table.cell(volatilityTable, 2, i + 1, str.tostring(array.get(hourlyCounts, i)), 
+                  bgcolor=bgcolor, 
+                  text_color=color.white)
+
+    // Add summary statistics
+    var label summaryLabel = label.new(bar_index, 0, "", color=color.navy, style=label.style_label_left, textcolor=color.white)
+    label.set_xy(summaryLabel, bar_index, 0)
+    label.set_text(summaryLabel, "Most Volatile Hour: " + str.tostring(maxHour) + ":00\nAverage Range: " + str.tostring(maxRange, "#.0") + " pips")
+
+
+// Plot zero line for reference
+hline(0, "Zero Line", color=color.gray)
+
+// Add indicator values to data window
+plotchar(pipRange, "Current Hour Range", "", location.top)

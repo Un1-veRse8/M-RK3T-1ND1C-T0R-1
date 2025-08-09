@@ -1,0 +1,258 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Information Asymmetry Gradient (IAG)", overlay=false, precision=3)
+
+// ========================================
+// INPUT PARAMETERS
+// ========================================
+
+// Core IAG Settings
+group_core = "🌌 Core Asymmetry Parameters"
+short_len = input.int(8, "Fast Information Period", minval=2, group=group_core, tooltip="Period for detecting immediate information flow changes.\n\n• Scalping (1-5min): Use 5-8\n• Day Trading (15min-1hr): Use 8-12\n• Swing Trading (4hr+): Use 12-20\n\nShorter = more responsive to sudden asymmetries")
+
+long_len = input.int(34, "Slow Information Period", minval=10, group=group_core, tooltip="Baseline period for information context.\n\n• Should be 3-5x the fast period\n• Default (34): Fibonacci number, works well\n• Higher values = more stable baseline\n\nCaptures the broader information regime")
+
+gradient_smooth = input.int(3, "Gradient Smoothing", minval=1, maxval=10, group=group_core, tooltip="Smooths the gradient calculation to reduce noise.\n\n• 1-2: Raw, responsive\n• 3-5: Balanced (recommended)\n• 6-10: Very smooth, may lag")
+
+// Asymmetry Calculation
+group_asym = "📊 Asymmetry Method"
+calc_mode = input.string("Weighted", "Calculation Mode", options=["Simple", "Weighted", "Logarithmic"], group=group_asym, tooltip="How to calculate directional information:\n\n• Simple: Basic volume split\n• Weighted: Volume × price movement (default)\n• Logarithmic: Log-scaled for large moves")
+
+show_ratio = input.bool(false, "Use Ratio (vs Difference)", group=group_asym, tooltip="Ratio: UpInfo/DownInfo (multiplicative)\nDifference: UpInfo-DownInfo (additive)\n\nRatio better for comparing different volatility regimes")
+
+// Volatility Analysis
+group_vol = "🌊 Volatility Analysis"
+stdev_len = input.int(21, "Volatility Window", minval=5, group=group_vol, tooltip="Period for measuring asymmetry volatility.\n\n• Sudden spikes = information shock\n• Rising volatility = regime uncertainty\n• Low volatility = stable information flow")
+
+vol_threshold = input.float(1.5, "Volatility Alert Level", minval=0.5, step=0.1, group=group_vol, tooltip="Z-score level for volatility alerts.\n\nWhen asymmetry volatility exceeds this, market information flow is unstable")
+
+// Visual Settings
+group_visual = "🎨 Visual Settings"
+color_theme = input.string("Starry Night", "Color Theme", options=["Starry Night", "Sunflowers", "Café Terrace", "Wheat Field"], group=group_visual, tooltip="Van Gogh-inspired color palettes:\n\n• Starry Night: Deep blues and yellows\n• Sunflowers: Warm yellows and browns\n• Café Terrace: Night blues and warm lights\n• Wheat Field: Golden and sky blue")
+
+show_swirls = input.bool(true, "Show Swirl Effects", group=group_visual, tooltip="Adds Van Gogh-style swirling patterns to visualize information flow turbulence")
+
+show_stars = input.bool(true, "Show Signal Stars", group=group_visual, tooltip="Displays star markers at significant asymmetry points")
+
+show_dashboard = input.bool(true, "Show Info Dashboard", group=group_visual, tooltip="Displays current metrics and market state")
+
+show_flow = input.bool(true, "Show Flow Visualization", group=group_visual, tooltip="Main gradient line with artistic effects")
+
+// ========================================
+// CALCULATIONS
+// ========================================
+
+// Ensure long > short
+long_len_adj = math.max(long_len, short_len + 1)
+
+// Price and volume components
+bar_range = high - low
+body_size = math.abs(close - open)
+upper_wick = high - math.max(close, open)
+lower_wick = math.min(close, open) - low
+
+// Directional components
+is_bullish = close > open
+body_up = is_bullish ? body_size : 0
+body_down = is_bullish ? 0 : body_size
+
+// Calculate information content based on mode
+UpInfo = 0.0
+DownInfo = 0.0
+
+if calc_mode == "Simple"
+    UpInfo := volume * (body_up / (bar_range + 1e-10))
+    DownInfo := volume * (body_down / (bar_range + 1e-10))
+else if calc_mode == "Weighted"
+    // Weight by price movement and wicks
+    up_weight = body_up + upper_wick * 0.5
+    down_weight = body_down + lower_wick * 0.5
+    UpInfo := volume * (up_weight / (bar_range + 1e-10))
+    DownInfo := volume * (down_weight / (bar_range + 1e-10))
+else  // Logarithmic
+    up_move = math.log(1 + body_up / (bar_range + 1e-10))
+    down_move = math.log(1 + body_down / (bar_range + 1e-10))
+    UpInfo := volume * up_move
+    DownInfo := volume * down_move
+
+// Raw asymmetry
+RawAsym = show_ratio ? UpInfo / (DownInfo + 1e-10) : UpInfo - DownInfo
+
+// Gradient calculation with smoothing
+asym_fast = ta.ema(RawAsym, short_len)
+asym_slow = ta.ema(RawAsym, long_len_adj)
+gradient_raw = asym_fast - asym_slow
+gradient = ta.ema(gradient_raw, gradient_smooth)
+
+// Normalize gradient (Z-score)
+grad_mean = ta.sma(gradient, long_len_adj)
+grad_std = ta.stdev(gradient, long_len_adj)
+gradient_z = grad_std > 0 ? (gradient - grad_mean) / grad_std : 0
+
+// Volatility of asymmetry
+asym_volatility = ta.stdev(RawAsym, stdev_len)
+vol_mean = ta.sma(asym_volatility, stdev_len)
+vol_std = ta.stdev(asym_volatility, stdev_len)
+vol_z = vol_std > 0 ? (asym_volatility - vol_mean) / vol_std : 0
+
+// Information flow strength (0-100)
+flow_strength = math.min(100, math.abs(gradient_z) * 33.33)
+
+// Detect regime
+is_extreme = math.abs(gradient_z) > 2
+is_high_vol = vol_z > vol_threshold
+is_building = math.abs(gradient_z) > 1 and math.abs(gradient_z) <= 2
+flow_direction = gradient_z > 0 ? 1 : -1
+
+// ========================================
+// COLOR THEMES
+// ========================================
+
+get_starry_colors(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#4169E1, 20), color.new(#FFD700, 0))  // Royal Blue to Gold
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#191970, 20), color.new(#87CEEB, 0))  // Midnight Blue to Sky Blue
+
+get_sunflower_colors(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#FFA500, 20), color.new(#FF4500, 0))  // Orange to Red-Orange
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#DAA520, 20), color.new(#8B4513, 0))  // Goldenrod to Saddle Brown
+
+get_cafe_colors(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#FF6347, 20), color.new(#FFE4B5, 0))  // Tomato to Moccasin
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#4682B4, 20), color.new(#000080, 0))  // Steel Blue to Navy
+
+get_wheat_colors(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#F0E68C, 20), color.new(#FFD700, 0))  // Khaki to Gold
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#87CEEB, 20), color.new(#4682B4, 0))  // Sky Blue to Steel Blue
+
+// Select color based on theme
+base_color = switch color_theme
+    "Starry Night" => get_starry_colors(gradient_z, flow_direction)
+    "Sunflowers" => get_sunflower_colors(gradient_z, flow_direction)
+    "Café Terrace" => get_cafe_colors(gradient_z, flow_direction)
+    "Wheat Field" => get_wheat_colors(gradient_z, flow_direction)
+
+// ========================================
+// VISUALIZATION
+// ========================================
+
+// Background with swirl effect
+swirl_intensity = show_swirls ? math.min(90, 95 - flow_strength * 0.5 - vol_z * 10) : 100
+bgcolor(show_swirls ? color.new(base_color, swirl_intensity) : na)
+
+// Zero line
+hline(0, "Equilibrium", color=color.new(color.gray, 70), linewidth=1)
+
+// Threshold zones with artistic style
+h1 = hline(2, "", color=color.new(color.white, 95), linewidth=1, linestyle=hline.style_dotted)
+h2 = hline(-2, "", color=color.new(color.white, 95), linewidth=1, linestyle=hline.style_dotted)
+h3 = hline(1, "", color=color.new(color.white, 98), linewidth=1, linestyle=hline.style_dotted)
+h4 = hline(-1, "", color=color.new(color.white, 98), linewidth=1, linestyle=hline.style_dotted)
+
+// Fill zones with gradient effect
+fill(h1, h3, color=color.new(base_color, 94), title="Upper Flow Zone")
+fill(h2, h4, color=color.new(base_color, 94), title="Lower Flow Zone")
+
+// Main gradient flow with Van Gogh brush strokes
+plot(show_flow ? gradient_z : na, "Information Gradient", color=base_color, linewidth=3, style=plot.style_line)
+plot(show_flow ? gradient_z : na, "Gradient Glow", color=color.new(base_color, 40), linewidth=6, style=plot.style_line)
+plot(show_flow ? gradient_z : na, "Gradient Aura", color=color.new(base_color, 70), linewidth=10, style=plot.style_line)
+
+// Volatility ribbon
+plot(show_swirls ? vol_z : na, "Volatility Ribbon", color=color.new(color.orange, 60), linewidth=2, style=plot.style_area)
+
+// Signal stars
+plotshape(show_stars and is_extreme and gradient_z > 0 ? gradient_z : na, "Bullish Star", style=shape.circle, location=location.absolute, color=color.new(#FFD700, 0), size=size.small)
+plotshape(show_stars and is_extreme and gradient_z < 0 ? gradient_z : na, "Bearish Star", style=shape.circle, location=location.absolute, color=color.new(#4169E1, 0), size=size.small)
+plotshape(show_stars and is_high_vol ? 0 : na, "Volatility Star", style=shape.cross, location=location.absolute, color=color.new(color.orange, 0), size=size.tiny)
+// ========================================
+// DASHBOARD
+// ========================================
+
+var table info_panel = table.new(position.top_right, 1, 6, bgcolor=color.new(#1a1a2e, 85), border_color=color.new(base_color, 50), border_width=1)
+
+if barstate.islast and show_dashboard
+    // Spacer
+    table.cell(info_panel, 0, 0, "", text_size=size.tiny)
+    
+    // Status
+    status = is_extreme ? "🌟 EXTREME ASYMMETRY" : is_building ? "🌙 BUILDING FLOW" : is_high_vol ? "🌪️ HIGH VOLATILITY" : "☁️ BALANCED"
+    status_color = is_extreme ? base_color : is_building ? color.new(base_color, 30) : is_high_vol ? color.orange : color.gray
+    
+    table.cell(info_panel, 0, 1, status, text_color=status_color, text_size=size.normal, text_halign=text.align_center)
+    
+    // Gradient with visual
+    grad_text = "Gradient: " + str.tostring(gradient_z, "#.##")
+    grad_bars = ""
+    grad_level = math.min(10, math.max(0, math.round(math.abs(gradient_z) * 5)))
+    for i = 1 to 10
+        grad_bars := grad_bars + (i <= grad_level ? "▮" : "▯")
+    
+    table.cell(info_panel, 0, 2, grad_text + "\n" + grad_bars, text_color=color.white, text_size=size.small, text_halign=text.align_left, text_font_family=font.family_monospace)
+    
+    // Flow strength
+    flow_text = "Flow: " + str.tostring(math.round(flow_strength), "#") + "%"
+    flow_color = flow_strength > 66 ? color.new(#00ff00, 0) : flow_strength > 33 ? color.new(#ffff00, 0) : color.new(#ff0000, 0)
+    
+    table.cell(info_panel, 0, 3, flow_text, text_color=flow_color, text_size=size.small, text_halign=text.align_center)
+    
+    // Information balance
+    info_balance = show_ratio ? UpInfo / (DownInfo + 1e-10) : UpInfo - DownInfo
+    balance_text = "Balance: " + (info_balance > 0 ? "↑" : "↓") + " " + str.tostring(math.abs(info_balance), "#.#")
+    balance_color = info_balance > 0 ? color.new(#00ff00, 0) : color.new(#ff0000, 0)
+    
+    table.cell(info_panel, 0, 4, balance_text, text_color=balance_color, text_size=size.small, text_halign=text.align_center)
+    
+    // Volatility status
+    vol_text = "Vol: " + (is_high_vol ? "⚠️ HIGH" : "✓ Normal")
+    
+    table.cell(info_panel, 0, 5, vol_text, text_color=is_high_vol ? color.orange : color.gray, text_size=size.small, text_halign=text.align_center)
+
+// Clear dashboard if disabled
+if not show_dashboard and barstate.islast
+    table.clear(info_panel, 0, 0, 0, 5)
+
+// ========================================
+// TRADING GUIDE
+// ========================================
+
+var table guide = table.new(position.bottom_left, 1, 1, bgcolor=color.new(#000000, 90), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast and show_dashboard
+    guide_text = "🎨 IAG Trading Guide:\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "🌟 EXTREME = Major info imbalance\n" +
+                 "🌙 BUILDING = Asymmetry forming\n" +
+                 "🌪️ HIGH VOL = Unstable flow\n" +
+                 "☁️ BALANCED = No clear bias\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "📈 Positive = Bullish information\n" +
+                 "📉 Negative = Bearish information\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "Flow >66% = Strong conviction\n" +
+                 "Vol spike = Regime uncertainty"
+    
+    table.cell(guide, 0, 0, guide_text, text_color=color.new(color.white, 20), text_size=size.tiny, text_halign=text.align_left, text_font_family=font.family_monospace)
+
+// ========================================
+// ALERTS
+// ========================================
+
+alertcondition(is_extreme and not is_extreme[1], "IAG Extreme Asymmetry", "Extreme information asymmetry detected")
+alertcondition(is_building and not is_building[1], "IAG Building Flow", "Information flow building")
+alertcondition(is_high_vol and not is_high_vol[1], "IAG High Volatility", "Information volatility spike")
+alertcondition(gradient_z > 2 and gradient_z[1] <= 2, "IAG Bullish Extreme", "Extreme bullish information flow")
+alertcondition(gradient_z < -2 and gradient_z[1] >= -2, "IAG Bearish Extreme", "Extreme bearish information flow")

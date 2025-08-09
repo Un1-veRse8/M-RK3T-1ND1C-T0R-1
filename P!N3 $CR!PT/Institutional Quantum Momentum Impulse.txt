@@ -1,0 +1,298 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © BullByte
+
+//@version=6
+indicator("Institutional Quantum Momentum Impulse [BullByte]", shorttitle="IQMI", overlay=false, precision=3, max_lines_count=500, scale=scale.right)
+
+// ———— INPUTS ————
+// Core Parameters
+resonance      = input.float(2.618, "Resonance Factor", minval=1.0, maxval=3.618, step=0.1)
+entropyStr     = input.string("0.382", "Entropy Filter", options=["0.382", "0.50", "0.618"])
+smoothType     = input.string("WMA", "Smoothing Type", options=["EMA", "WMA", "HMA"])
+normPeriod     = input.int(20, "Normalization Period", minval=10)
+
+// Smoothing Parameter for QM
+qmSmoothPeriod = input.int(5, "QM Smoothing Period", minval=1)
+
+// Advanced Features
+enableOrderFlow = input.bool(true, "Enable Institutional Order Flow")
+enablePatternRec = input.bool(true, "Enable Pattern Recognition")
+
+// Dashboard Settings
+theme         = input.string("Dark", "Dashboard Theme", options=["Light", "Dark"])
+dashboardSize = input.string("Compact", "Dashboard Size", options=["Compact", "Normal", "Expanded"])
+
+// ———— CORE CALCULATIONS ————
+// Convert entropy string to float
+entropy = entropyStr == "0.382" ? 0.382 : entropyStr == "0.50" ? 0.50 : 0.618
+
+// Institutional Volatility Engine
+fractalVolatility() =>
+    tr       = ta.tr
+    keltner  = ta.ema(tr, 14) / (ta.ema(close, 14) + 0.0001)
+    var float garchVol = 0.0
+    garchVol := 0.2 * ta.stdev(close, 5) + 0.8 * nz(garchVol[1])
+    priceEntropy = math.abs(math.log(ta.sma(close, 5) / ta.sma(close, 20)))
+    (keltner + garchVol + priceEntropy) / 3
+
+volScore = fractalVolatility() * 100
+volTrend = volScore > ta.sma(volScore, 20)
+
+// Quantum Momentum Core
+momentumEngine(len, res) =>
+    hilbert   = 0.0962 * close + 0.5769 * nz(close[2]) - 0.5769 * nz(close[4]) - 0.0962 * nz(close[6])
+    mmtfMom   = smoothType == "EMA" ? ta.ema(hilbert, len) : smoothType == "WMA" ? ta.wma(hilbert, len) : ta.hma(hilbert, len)
+    momROC    = ta.roc(mmtfMom, len)
+    [macdLine, _, _] = ta.macd(close, 12, 26, 9)
+    [macdLong, _, _] = ta.macd(close, 26, 52, 9)
+    macdDiv  = (macdLine - macdLong) * res
+    stochVal = ta.stoch(close, high, low, len)
+    stochEnergy = stochVal - 50
+    composite = (momROC * 0.618) + (macdDiv * 1.618) - (stochEnergy * entropy)
+    composite * volScore / 100
+
+rawQM = momentumEngine(14, resonance)
+
+// Normalization (Z-Score)
+meanQM  = ta.sma(rawQM, normPeriod)
+stdevQM = ta.stdev(rawQM, normPeriod)
+qm_norm = (rawQM - meanQM) / (stdevQM == 0 ? 1 : stdevQM)
+
+// Additional smoothing on QM
+smoothedQM = ta.ema(qm_norm, qmSmoothPeriod)
+
+// Efficiency Ratio
+efficiency = math.abs(qm_norm - qm_norm[10]) / (math.sum(math.abs(qm_norm - qm_norm[1]), 10) + 0.00001)
+
+// Adaptive Thresholds
+dynamicThreshold() =>
+    ta.ema(ta.stdev(qm_norm, 20) * (1 + efficiency), 5)
+
+upperBand = dynamicThreshold()
+lowerBand = -upperBand
+
+// Market Phase Detection
+marketPhase() =>
+    vwmaFast       = ta.vwma(close, 20)
+    vwmaSlow       = ta.vwma(close, 50)
+    volumeDirection = vwmaFast > vwmaSlow ? 1 : -1
+    fractalState    = qm_norm > ta.highest(qm_norm, 5)[5] ? 1 : qm_norm < ta.lowest(qm_norm, 5)[5] ? -1 : 0
+    phaseScore      = volumeDirection + fractalState
+    phaseScore >= 2 ? 1 : phaseScore <= -2 ? -1 : 0
+
+currentPhase = marketPhase()
+
+// Liquidity Check
+spread    = high - low
+avgSpread = ta.sma(spread, 20)
+liquidity = spread > avgSpread * 0.6
+
+// ———— NEW ENHANCEMENTS ————
+
+// 1. Advanced Signal Confirmation System
+signalConfirmation() =>
+    // Price-Momentum Divergence Detection
+    bullishDiv = ta.lowest(smoothedQM, 5) > ta.lowest(smoothedQM, 5)[1] and ta.lowest(close, 5) < ta.lowest(close, 5)[1]
+    bearishDiv = ta.highest(smoothedQM, 5) < ta.highest(smoothedQM, 5)[1] and ta.highest(close, 5) > ta.highest(close, 5)[1]
+    
+    // Volume Confirmation
+    volConfirmation = volume > ta.sma(volume, 20) * 1.5
+    
+    // Trend Strength Filter
+    [_, _, adx] = ta.dmi(14, 14)
+    trendStrength = adx > 25
+    
+    // Calculate components separately
+    divergenceScore = bullishDiv ? 1 : bearishDiv ? -1 : 0
+    volumeScore = volConfirmation ? 1 : 0
+    phaseMultiplier = currentPhase > 0 ? 1 : currentPhase < 0 ? -1 : 0
+    trendScore = trendStrength ? 1 : 0
+    
+    // Composite Signal Score (-3 to +3)
+    divergenceScore + (volumeScore * phaseMultiplier) + (trendScore * currentPhase)
+
+signalStrength = signalConfirmation()
+
+// 2. Institutional Order Flow Integration
+institutionalOrderFlow() =>
+    // Large Block Detection
+    avgVol = ta.sma(volume, 20)
+    largeBuy = volume > avgVol * 2 and close > open and close > ta.sma(close, 5)
+    largeSell = volume > avgVol * 2 and close < open and close < ta.sma(close, 5)
+    
+    // Cumulative Institutional Activity with safe access to previous value
+    var float instNet = 0.0
+    instNet := largeBuy ? nz(instNet[1], 0) + (volume / avgVol) :
+               largeSell ? nz(instNet[1], 0) - (volume / avgVol) :
+               nz(instNet[1], 0) * 0.95  // Decay factor
+    
+    // Normalize to Z-score
+    meanInst = ta.sma(instNet, 50)
+    stdevInst = ta.stdev(instNet, 50)
+    (instNet - meanInst) / (stdevInst == 0 ? 1 : stdevInst)
+
+orderFlowScore = enableOrderFlow ? institutionalOrderFlow() : na
+
+// 3. Machine Learning Inspired Pattern Recognition
+patternRecognition() =>
+    // Fractal Pattern Detection
+    fractalTop = high[2] > high[1] and high[2] > high and high[2] > high[3] and high[2] > high[4]
+    fractalBottom = low[2] < low[1] and low[2] < low and low[2] < low[3] and low[2] < low[4]
+    
+    // Momentum Waves
+    momWaveUp = smoothedQM > smoothedQM[1] and smoothedQM[1] > smoothedQM[2] and smoothedQM[2] > smoothedQM[3]
+    momWaveDown = smoothedQM < smoothedQM[1] and smoothedQM[1] < smoothedQM[2] and smoothedQM[2] < smoothedQM[3]
+    
+    // Calculate components separately
+    fractalScore = fractalTop ? -1 : fractalBottom ? 1 : 0
+    waveScore = momWaveUp ? 1 : momWaveDown ? -1 : 0
+    
+    // Composite Pattern Score (-2 to +2)
+    fractalScore + waveScore
+
+patternScore = enablePatternRec ? patternRecognition() : na
+
+// ———— MARKET ANALYSIS ————
+// Cumulative Delta Analysis
+buyVolume = ta.cum(close > open ? volume : 0)
+sellVolume = ta.cum(close < open ? volume : 0)
+netDelta = (buyVolume - sellVolume) / 1000  // Normalized to thousands
+deltaTrend = netDelta > netDelta[1] ? 1 : netDelta < netDelta[1] ? -1 : 0
+
+// Market Regime Filter
+[dmiPlus, dmiMinus, adx] = ta.dmi(14, 14)
+isTrending = adx > 25
+marketRegime = isTrending ? (dmiPlus > dmiMinus ? 1 : -1) : 0
+
+// ———— VISUAL ENHANCEMENTS ————
+// Gradient Coloring
+qmColor = color.from_gradient(smoothedQM, lowerBand * 1.5, upperBand * 1.5, color.red, color.lime)
+
+// ———— ENHANCED DASHBOARD ————
+// Color Scheme
+headerTextColor = theme == "Dark" ? color.white : color.black
+headerBgColor   = theme == "Dark" ? color.new(#1A237E, 0) : color.new(#1976D2, 90)
+cellTextColor   = theme == "Dark" ? color.white : color.black
+cellBgColor     = theme == "Dark" ? color.new(#121212, 80) : color.new(#FFFFFF, 80)
+borderColor     = color.new(#0D47A1, 70)
+
+// Determine text size
+textSize = dashboardSize == "Compact" ? size.small : dashboardSize == "Normal" ? size.normal : size.large
+
+// Create enhanced dashboard table (14 rows)
+var table dashboard = table.new(position.top_right, 3, 14,
+     border_width = 1,
+     border_color = borderColor,
+     frame_color  = theme == "Dark" ? color.new(#0D0D0D, 90) : color.new(#F5F5F5, 90),
+     frame_width  = 1)
+
+if barstate.islast
+    // Header row
+    table.cell(dashboard, 0, 0, "Metric", text_color=headerTextColor, bgcolor=headerBgColor, text_size=textSize)
+    table.cell(dashboard, 1, 0, "Value", text_color=headerTextColor, bgcolor=headerBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 0, "Description", text_color=headerTextColor, bgcolor=headerBgColor, text_size=textSize)
+    
+    // Core Metrics
+    table.cell(dashboard, 0, 1, "QM (Z-Score)", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 1, 1, str.tostring(smoothedQM, "#.##"), text_color=qmColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 1, "Momentum Strength", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Bands
+    table.cell(dashboard, 0, 2, "Upper Band", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 1, 2, str.tostring(upperBand, "#.##"), text_color=color.blue, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 2, "Overbought Threshold", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    table.cell(dashboard, 0, 3, "Lower Band", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 1, 3, str.tostring(lowerBand, "#.##"), text_color=color.orange, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 3, "Oversold Threshold", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Market Conditions
+    table.cell(dashboard, 0, 4, "Market Phase", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    phaseText  = currentPhase == 1 ? "Bullish" : currentPhase == -1 ? "Bearish" : "Neutral"
+    phaseColor = currentPhase == 1 ? color.green : currentPhase == -1 ? color.red : color.gray
+    table.cell(dashboard, 1, 4, phaseText, text_color=phaseColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 4, "Volume + Momentum Alignment", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Volatility
+    table.cell(dashboard, 0, 5, "Volatility", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    volStatus = volTrend ? "Expanding" : "Contracting"
+    table.cell(dashboard, 1, 5, str.tostring(volScore, "#.#") + " (" + volStatus + ")", 
+         text_color=volTrend ? color.teal : color.purple, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 5, "Volatility Score", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Efficiency
+    table.cell(dashboard, 0, 6, "Efficiency", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    effColor = efficiency >= 0.8 ? color.green : efficiency >= 0.5 ? color.blue : color.red
+    table.cell(dashboard, 1, 6, str.tostring(efficiency, "#.##"), text_color=effColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 6, "Momentum Quality", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Liquidity
+    table.cell(dashboard, 0, 7, "Liquidity", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    liqStatus = liquidity ? "High" : "Low"
+    table.cell(dashboard, 1, 7, liqStatus, text_color=liquidity ? color.green : color.red, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 7, "Spread vs Avg", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Cumulative Delta
+    table.cell(dashboard, 0, 8, "Cumulative Delta", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 1, 8, str.tostring(netDelta, "#.##") + "K", text_color=deltaTrend == 1 ? color.green : color.red, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 8, "Buyers vs Sellers", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Market Regime
+    table.cell(dashboard, 0, 9, "Market Regime", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    regimeText = marketRegime == 1 ? "Bull Trend" : marketRegime == -1 ? "Bear Trend" : "Ranging"
+    regimeColor = marketRegime == 1 ? color.green : marketRegime == -1 ? color.red : color.blue
+    table.cell(dashboard, 1, 9, regimeText, text_color=regimeColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 9, isTrending ? "Trending" : "Mean-Reverting", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Signal Confirmation (no bracketed value)
+    table.cell(dashboard, 0, 10, "Signal Strength", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    // Only show the signal text without appended numeric value
+    var string signalText = "Neutral"
+    var color signalColor = color.gray
+    if signalStrength >= 2
+        signalText := "Strong Buy"
+        signalColor := color.green
+    else if signalStrength >= 1
+        signalText := "Buy"
+        signalColor := color.lime
+    else if signalStrength <= -2
+        signalText := "Strong Sell"
+        signalColor := color.red
+    else if signalStrength <= -1
+        signalText := "Sell"
+        signalColor := color.orange
+    table.cell(dashboard, 1, 10, signalText, text_color=signalColor, bgcolor=cellBgColor, text_size=textSize)
+    table.cell(dashboard, 2, 10, "Composite Signal Score", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Institutional Order Flow (if enabled)
+    if enableOrderFlow
+        flowColor = orderFlowScore > 0 ? color.green : color.red
+        table.cell(dashboard, 0, 11, "Institutional Flow", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+        table.cell(dashboard, 1, 11, str.tostring(orderFlowScore, "#.##"), text_color=flowColor, bgcolor=cellBgColor, text_size=textSize)
+        table.cell(dashboard, 2, 11, "Large Block Activity", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+    
+    // Pattern Recognition (if enabled, no bracketed value)
+    if enablePatternRec
+        var string patternText = "Neutral"
+        var color patternColor = color.gray
+        if patternScore >= 2
+            patternText := "Strong Bullish"
+            patternColor := color.green
+        else if patternScore >= 1
+            patternText := "Bullish"
+            patternColor := color.green
+        else if patternScore <= -2
+            patternText := "Strong Bearish"
+            patternColor := color.red
+        else if patternScore <= -1
+            patternText := "Bearish"
+            patternColor := color.red
+        table.cell(dashboard, 0, 12, "Pattern Recognition", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+        table.cell(dashboard, 1, 12, patternText, text_color=patternColor, bgcolor=cellBgColor, text_size=textSize)
+        table.cell(dashboard, 2, 12, "Fractal + Momentum Patterns", text_color=cellTextColor, bgcolor=cellBgColor, text_size=textSize)
+
+// ———— PLOTTING ————
+plot(smoothedQM, "Quantum Momentum", color=qmColor, linewidth=2)
+plot(upperBand, "Upper Band", color=color.blue, linewidth=1)
+plot(lowerBand, "Lower Band", color=color.orange, linewidth=1)
+plot(0, "Zero Line", color=color.gray, linewidth=1)

@@ -1,0 +1,92 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Harmony in Havoc - The Entropy of VoVix", overlay=false, max_bars_back=500)
+
+// === INPUTS WITH TOOLTIPS ===
+fastLen    = input.int(5, "⚡ VoVix Fast ATR", tooltip="Length for the fast ATR in the VoVix calculation. Lower = more sensitive to volatility spikes.")
+slowLen    = input.int(34, "⚡ VoVix Slow ATR", tooltip="Length for the slow ATR in the VoVix calculation. Higher = more selective, filters out noise.")
+stdevLen   = input.int(21, "⚡ VoVix ATR Stdev", tooltip="ATR standard deviation window for VoVix normalization. Controls how 'rare' a spike must be.")
+entropyWin = input.int(50, "🧮 Entropy Window", tooltip="Number of bars to look back for entropy calculation. Shorter = more responsive, longer = more stable.")
+bins       = input.int(10, "🧮 Entropy Bins", tooltip="Number of bins for entropy calculation. Higher = more detail, lower = more general.")
+
+showVoVixGlow   = input.bool(true, "💜 Show VoVix Glow", tooltip="Toggle the purple glow behind the VoVix spike line.")
+showEntropyGlow = input.bool(true, "💛 Show Entropy Glow", tooltip="Toggle the yellow glow behind the entropy line.")
+showDashboard   = input.bool(true, "📊 Show Dashboard (Desktop Only)", tooltip="Show the full dashboard table in the top right (desktop only).")
+showInfoLabel   = input.bool(true, "📱 Show Info Label", tooltip="Show a compact info label for mobile/desktop.")
+
+spike_threshold = input.float(1.0, "⚡ VoVix Spike Threshold", tooltip="Minimum absolute VoVix spike to show a directional marker.")
+
+// === VoVix Calculation ===
+atr_fast = ta.atr(fastLen)
+atr_slow = ta.atr(slowLen)
+atr_vol  = ta.stdev(atr_fast, stdevLen)
+vo_spike = (atr_fast - atr_slow) / (atr_vol + 1e-6)
+
+// === Entropy Calculation (unique bin count proxy) ===
+vo_bins = math.round(vo_spike * bins)
+var float[] voArr = array.new_float()
+var float entropy = na
+if bar_index > entropyWin
+    if array.size(voArr) >= entropyWin
+        array.shift(voArr)
+    array.push(voArr, vo_bins)
+    unique = array.new_float()
+    for i = 0 to array.size(voArr) - 1
+        val = array.get(voArr, i)
+        if not array.includes(unique, val)
+            array.push(unique, val)
+    entropy := array.size(unique) / bins
+else
+    entropy := na
+
+gauge_val = math.abs(vo_spike) / (entropy + 1e-6)
+gauge_pct = math.min(gauge_val, 1.0)
+bar_length = 20
+full_bars = math.round(gauge_pct * bar_length)
+empty_bars = bar_length - full_bars
+gauge_str = str.repeat('█', full_bars) + str.repeat('░', empty_bars)
+gauge_color = gauge_pct > 0.9 ? color.lime : gauge_pct > 0.6 ? color.yellow : color.teal
+
+status = gauge_pct > 0.9 ? "🚨 Take Action!!" : gauge_pct > 0.6 ? "Get ready!" : "Wait"
+take_action = gauge_pct > 0.9
+
+// === DIRECTIONAL DIVERGENCE MARKERS (NO PRICE) ===
+div_above = vo_spike > spike_threshold
+div_below = vo_spike < -spike_threshold
+
+// === CORRELATING BACKGROUND ===
+bgcolor(take_action ? color.new(color.yellow, 90) : div_above ? color.new(color.red, 90) : div_below ? color.new(color.green, 90) : na, title="Directional Background")
+
+// === DASHBOARD (TOP RIGHT OF INDICATOR PANE, DESKTOP ONLY) ===
+if showDashboard
+    var table dash = na
+    if na(dash)
+        dash := table.new(position.top_right, 1, 5, bgcolor=color.new(color.black, 90), border_color=color.new(color.purple, 80), border_width=1)
+    table.clear(dash, 0, 0)
+    table.cell(dash, 0, 0, "☯️ Harmony in Havoc            ", text_color=color.rgb(0, 255, 68), text_size=size.normal, bgcolor=color.new(color.purple, 0))
+    table.cell(dash, 0, 1, "VoVix Spike: " + str.tostring(vo_spike, "#.##"), text_color=color.aqua, text_size=size.normal)
+    table.cell(dash, 0, 2, "Entropy: " + str.tostring(entropy, "#.##"), text_color=color.yellow, text_size=size.normal)
+    table.cell(dash, 0, 3, "Status: " + status, text_color=gauge_color, text_size=size.normal)
+    table.cell(dash, 0, 4, "VoVix [" + gauge_str + "] " + str.tostring(gauge_pct * 100, "#.0") + "%", text_color=gauge_color, text_size=size.normal)
+
+// === BEAUTIFUL LINES ===
+plot(showVoVixGlow ? vo_spike : na, color=color.new(color.purple, 80), linewidth=7, title="VoVix Spike Glow")
+plot(showEntropyGlow ? entropy : na, color=color.new(color.yellow, 80), linewidth=7, title="Entropy Glow")
+plot(vo_spike, color=color.purple, linewidth=2, title="VoVix Spike")
+plot(entropy, color=color.orange, linewidth=2, title="Entropy")
+
+// === MOBILE/COMPACT INFO LABEL ===
+if showInfoLabel
+    labelText = "VoVix: " + str.tostring(vo_spike, "#.##") + " | Entropy: " + str.tostring(entropy, "#.##") + " | " + status
+    var label mobLabel = na
+    if na(mobLabel)
+        mobLabel := label.new(bar_index, na, labelText, xloc.bar_index, yloc.price, color.new(color.black, 80), label.style_label_left, color.white, size.small)
+    label.set_xy(mobLabel, bar_index, na)
+    label.set_text(mobLabel, labelText)
+    label.set_textcolor(mobLabel, gauge_color)
+    label.set_style(mobLabel, label.style_label_left)
+
+// === Optional: Plot a shape for "Take Action" ===
+plotshape(take_action, style=shape.diamond, location=location.top, color=color.yellow, size=size.tiny, title="Take Action Marker")

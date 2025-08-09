@@ -1,0 +1,216 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// BullVisionCapital
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%+=#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*==+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@*===+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@#+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@#====+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@==#@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@#=====+%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*===#@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@#========*#%%%@@%%%%%%%%%%%@@@@@@@@@%#+====+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@#==============*+===========*%@#+========+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%*=============+=============#@*======+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%#+========================#@%==+#%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%%##+==================+%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@+===============================@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%==================*@@@*=======@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%@@@%#*=============++*%#=====%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@#==========================+=====*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*==================================+%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@*==========++=========================*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@#==========+@%+====================#+====#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@%+=========+@@@@#===================#@%+==%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@#=========+@@@@@@@@@%%%%%%%*==============@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@#========+@@@@@@@@@@@@@@@@@@@@@#========+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@%+=======%@@@@@@@@@@@@+@@@@@@@@@@@%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@%+=====*@@@@@@@%@@@%+==#@@@@@@#%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@+====#@@@@@@@=@@@%+==#@@@@@===#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@#===#@@@@@%*=*%@%+==#@@@@@==*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%*=#@@@@@#+==%@%+==#@@@@+=#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%@@@@@@#+==%@%+==#@@@+=%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@#+==%@@@=@@@@**@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@#+==%@@@#@@@#%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%=%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+//@version=6
+indicator('Laplace Momentum Percentile ║ BullVision ', shorttitle = '🔬 Laplace Momentum Percentile ║ BullVision 🔬', overlay = false, precision = 2)
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               INPUTS
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Laplace Transform Settings
+laplace_s = input.float(0.4, 'Transform Parameter (s)', minval = 0.1, maxval = 2.0, step = 0.1, tooltip = 'Controls decay rate. Lower = smoother, Higher = more responsive')
+laplace_length = input.int(10, 'Calculation Length', minval = 10, maxval = 50)
+price_source = input.string('close', 'Price Source', options = ['close', 'hl2', 'hlc3', 'ohlc4'])
+
+// Percentile Settings
+percentile_lookback = input.int(75, 'Percentile Lookback', minval = 50, maxval = 500)
+
+// Kalman Filter Settings
+grp_kalman = 'Kalman Filter Settings'
+use_kalman = input.bool(true, 'Enable Kalman Smoothing', group = grp_kalman)
+process_noise = input.float(0.05, 'Process Noise', minval = 0.001, maxval = 0.5, step = 0.001, group = grp_kalman, tooltip = 'Lower = more smoothing, Higher = more responsive')
+measurement_noise = input.float(0.5, 'Measurement Noise', minval = 0.1, maxval = 2.0, step = 0.1, group = grp_kalman, tooltip = 'Expected noise in the signal')
+
+// Visual Settings
+show_raw = input.bool(false, 'Show Raw Signal', tooltip = 'Display unsmoothed signal for comparison')
+strong_threshold = input.float(80, 'Strong Trend Level', minval = 50, maxval = 90)
+weak_threshold = input.float(20, 'Weak Trend Level', minval = 10, maxval = 50)
+
+// Colors
+col_strong_up = color.new(#00ffbb, 0) // Teal for strong up
+col_weak_up = color.new(#00ffbb, 50) // Light teal  
+col_neutral = color.new(#787B86, 20) // Gray
+col_weak_down = color.new(#ff0000, 50) // Light red
+col_strong_down = color.new(#ff0000, 0) // Red for strong down
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               LAPLACE TRANSFORM
+// ════════════════════════════════════════════════════════════════════════════════
+
+laplace_transform(series float src, float s_param, int length) =>
+    float numerator = 0.0
+    float denominator = 0.0
+
+    for i = 0 to length - 1 by 1
+        weight = math.exp(-s_param * i)
+        numerator := numerator + src[i] * weight
+        denominator := denominator + weight
+        denominator
+
+    denominator != 0 ? numerator / denominator : 0
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               PERCENTILE RANKING
+// ════════════════════════════════════════════════════════════════════════════════
+
+calculate_percentile_rank(series float value, int lookback) =>
+    current_val = value
+    count_below = 0
+
+    for i = 1 to lookback by 1
+        if value[i] < current_val
+            count_below := count_below + 1
+            count_below
+
+    count_below / lookback * 100
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                         KALMAN FILTER IMPLEMENTATION
+// ════════════════════════════════════════════════════════════════════════════════
+
+type KalmanState
+	float x // State estimate
+	float p // Error covariance
+	float k // Kalman gain
+	float q // Process noise
+	float r // Measurement noise
+
+var KalmanState kf = KalmanState.new(50, 1.0, 0.0, process_noise, measurement_noise)
+
+kalman_filter(float measurement, KalmanState state) =>
+    // Prediction step
+    state.p := state.p + state.q
+
+    // Update step
+    state.k := state.p / (state.p + state.r)
+    state.x := state.x + state.k * (measurement - state.x)
+    state.p := (1 - state.k) * state.p
+
+    state.x
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               MAIN CALCULATIONS
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Get price
+price = switch price_source
+    'close' => close
+    'hl2' => hl2
+    'hlc3' => hlc3
+    'ohlc4' => ohlc4
+    => close
+
+// Calculate Laplace transform
+laplace_value = laplace_transform(price, laplace_s, laplace_length)
+
+// Calculate percentile rank
+percentile_raw = calculate_percentile_rank(laplace_value, percentile_lookback)
+
+// Update Kalman filter parameters if changed
+if kf.q != process_noise
+    kf.q := process_noise
+    kf.q
+if kf.r != measurement_noise
+    kf.r := measurement_noise
+    kf.r
+
+// Apply Kalman filter for ultra-smooth output
+percentile_smooth = use_kalman ? kalman_filter(percentile_raw, kf) : percentile_raw
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               TREND DETECTION
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Simple, clean trend states
+trend = percentile_smooth > strong_threshold ? 2 : percentile_smooth > 50 ? 1 : percentile_smooth > weak_threshold ? 0 : percentile_smooth > 0 ? -1 : -2
+
+// Trend changes (for alerts)
+cross_up_strong = ta.crossover(percentile_smooth, strong_threshold)
+cross_down_weak = ta.crossunder(percentile_smooth, weak_threshold)
+cross_up_mid = ta.crossover(percentile_smooth, 50)
+cross_down_mid = ta.crossunder(percentile_smooth, 50)
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               PLOTTING
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Determine color based on value
+line_color = percentile_smooth > strong_threshold ? col_strong_up : percentile_smooth > 50 ? col_weak_up : percentile_smooth > weak_threshold ? col_neutral : percentile_smooth > 0 ? col_weak_down : col_strong_down
+
+// Main plot - the smooth line
+plot(percentile_smooth, 'Laplace Trend', color = line_color, linewidth = 2)
+
+// Raw signal (if enabled)
+plot(show_raw ? percentile_raw : na, 'Raw Signal', color = color.new(color.gray, 70), linewidth = 1)
+
+// Clean reference lines
+hline(strong_threshold, 'Strong', color = color.new(col_strong_up, 80), linestyle = hline.style_dotted)
+hline(50, 'Mid', color = color.new(color.gray, 80), linestyle = hline.style_solid)
+hline(weak_threshold, 'Weak', color = color.new(col_strong_down, 80), linestyle = hline.style_dotted)
+
+// Subtle background
+bgcolor(percentile_smooth > strong_threshold ? color.new(col_strong_up, 95) : percentile_smooth < weak_threshold ? color.new(col_strong_down, 95) : na)
+
+
+
+// ════════════════════════════════════════════════════════════════════════════════
+//                               SIMPLE INFO DISPLAY
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Current value label
+var label info = label.new(bar_index, 50, '', style = label.style_label_left, size = size.normal)
+
+if barstate.islast
+    trend_text = trend == 2 ? 'Strong ↑' : trend == 1 ? 'Weak ↑' : trend == 0 ? 'Neutral' : trend == -1 ? 'Weak ↓' : 'Strong ↓'
+
+    label.set_xy(info, bar_index + 3, percentile_smooth)
+    label.set_text(info, str.tostring(percentile_smooth, '#.#') + '\n' + trend_text)
+    label.set_color(info, color.new(color.black, 100))
+    label.set_textcolor(info, line_color)
+
+// ════════════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ════════════════════════════════════════════════════════════════════════════════
+
+alertcondition(cross_up_strong, 'Strong Uptrend', 'Laplace Trend: Entered strong uptrend zone (>80)')
+alertcondition(cross_down_weak, 'Strong Downtrend', 'Laplace Trend: Entered strong downtrend zone (<20)')
+alertcondition(cross_up_mid, 'Bullish Cross', 'Laplace Trend: Crossed above 50 (bullish)')
+alertcondition(cross_down_mid, 'Bearish Cross', 'Laplace Trend: Crossed below 50 (bearish)')

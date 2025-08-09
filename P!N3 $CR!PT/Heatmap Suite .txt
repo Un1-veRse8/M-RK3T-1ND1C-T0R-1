@@ -1,0 +1,236 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © Botnet101
+
+//@version=6
+indicator('Heatmap Suite [PhenLabs]', overlay = true, shorttitle = 'PhenLabs - HS', max_boxes_count = 500, max_lines_count = 500)
+
+// === DASHBOARD INPUTS ===  
+var string SIZE_TINY = 'Tiny'
+var string SIZE_SMALL = 'Small'
+var string SIZE_NORMAL = 'Normal'
+var string SIZE_LARGE = 'Large'
+var string SIZE_HUGE = 'Huge'
+var string SIZE_AUTO = 'Auto'
+
+var string POS_TOP_RIGHT = 'Top Right'
+var string POS_TOP_LEFT = 'Top Left'
+var string POS_BOTTOM_RIGHT = 'Bottom Right'
+var string POS_BOTTOM_LEFT = 'Bottom Left'
+var string POS_MIDDLE_RIGHT = 'Middle Right'
+var string POS_MIDDLE_LEFT = 'Middle Left'
+
+var string METHOD_KERNEL = 'Kernel Density'
+var string METHOD_EXP = 'Exponential Kernel'
+var string METHOD_VWAP = 'Volume-Weighted'
+
+// Initialize arrays for visualization elements  
+var array<line> significantLevels = array.new_line()
+var array<box> heatmapBoxes = array.new_box()
+
+// === USER INPUTS ===  
+// Group 1: Calculation Method Settings  
+var string GROUP_CALC = 'Calculation Method Settings'
+method = input.string(title = 'Heatmap Method', defval = METHOD_KERNEL, options = [METHOD_KERNEL, METHOD_EXP, METHOD_VWAP], tooltip = 'Select the density calculation method:\n' + '• Kernel Density: Traditional method, balanced view\n' + '• Exponential Kernel: Emphasizes recent price action\n' + '• Volume-Weighted: Focuses on high-volume areas', group = GROUP_CALC)
+
+lookbackPeriod = input.int(title = 'Lookback Period', defval = 100, minval = 10, maxval = 500, tooltip = 'Number of bars used for calculation.\n' + 'Longer periods: More stable, slower to adapt\n' + 'Shorter periods: More reactive, may be noisy\n' + 'Recommended: 50-200 bars', group = GROUP_CALC)
+
+// Group 2: Visualization Settings  
+var string GROUP_VIS = 'Visualization Settings'
+numZones = input.int(title = 'Number of Zones', defval = 20, minval = 5, maxval = 50, tooltip = 'Divides the price range into zones.\n' + 'More zones: Finer detail, may be harder to read\n' + 'Fewer zones: Clearer patterns, less detail\n' + 'Recommended: 8-15 zones', group = GROUP_VIS)
+
+sensitivity = input.float(title = 'Heat Sensitivity', defval = 1.5, minval = 0.5, maxval = 5.0, step = 0.1, tooltip = 'Adjusts the contrast of the heatmap.\n' + 'Higher values: More contrast, emphasizes extremes\n' + 'Lower values: More gradual transitions\n' + 'Recommended: 1.0-2.0', group = GROUP_VIS)
+
+// Group 3: Display Settings  
+var string GROUP_DISP = 'Dashboard Settings'
+dashboard_size = input.string(title = 'Dashboard Text Size', defval = SIZE_NORMAL, options = [SIZE_TINY, SIZE_SMALL, SIZE_NORMAL, SIZE_LARGE, SIZE_HUGE, SIZE_AUTO], tooltip = 'Controls the size of dashboard text.\n' + 'Auto adjusts based on chart size.\n' + 'Normal is recommended for most displays.', group = GROUP_DISP)
+
+dashboard_position = input.string(title = 'Dashboard Position', defval = POS_TOP_RIGHT, options = [POS_TOP_RIGHT, POS_TOP_LEFT, POS_BOTTOM_RIGHT, POS_BOTTOM_LEFT, POS_MIDDLE_RIGHT, POS_MIDDLE_LEFT], tooltip = 'Sets the location of the dashboard.\n' + 'Choose based on where price action\n' + 'is least likely to be obscured.', group = GROUP_DISP)
+
+// === UTILITY FUNCTIONS ===  
+get_text_size(size) =>
+    switch size
+        SIZE_TINY => size.tiny
+        SIZE_SMALL => size.small
+        SIZE_NORMAL => size.normal
+        SIZE_LARGE => size.large
+        SIZE_HUGE => size.huge
+        SIZE_AUTO => size.auto
+        => size.normal
+
+get_position(pos_string) =>
+    switch pos_string
+        POS_TOP_RIGHT => position.top_right
+        POS_TOP_LEFT => position.top_left
+        POS_BOTTOM_RIGHT => position.bottom_right
+        POS_BOTTOM_LEFT => position.bottom_left
+        POS_MIDDLE_RIGHT => position.middle_right
+        POS_MIDDLE_LEFT => position.middle_left
+        => position.top_right
+
+// === COLOR DEFINITIONS ===  
+var array<color> heatColors = array.from(color.new(#FF0000, 85), color.new(#FF4400, 85), color.new(#FF8800, 85), color.new(#FFCC00, 85), color.new(#FFFF00, 85), color.new(#CCFF00, 85), color.new(#88FF00, 85), color.new(#44FF00, 85), color.new(#00FF00, 85)) // Highest density   color.new(#FF4400, 85),   color.new(#FF8800, 85),   color.new(#FFCC00, 85),   color.new(#FFFF00, 85),   color.new(#CCFF00, 85),   color.new(#88FF00, 85),   color.new(#44FF00, 85),   color.new(#00FF00, 85)   // Lowest density   )  
+
+// === DATA STORAGE ===  
+var array<float> prices = array.new_float(0)
+var array<float> volumes = array.new_float(0)
+var array<float> zoneHeat = array.new_float(numZones, 0.0)
+var array<float> zoneLevels = array.new_float(numZones + 1, 0.0)
+
+// === PRICE AND VOLUME CALCULATIONS ===  
+float highestPrice = ta.highest(high, lookbackPeriod)
+float lowestPrice = ta.lowest(low, lookbackPeriod)
+float priceranges = highestPrice - lowestPrice
+float zoneHeight = priceranges / numZones
+
+// Update data arrays  
+array.push(prices, close)
+array.push(volumes, volume)
+
+if array.size(prices) > lookbackPeriod
+    array.shift(prices)
+    array.shift(volumes)
+
+// === UTILITY FUNCTIONS ===  
+normalize(float value, float min, float max) =>
+    max != min ? (value - min) / (max - min) : 0.5
+
+sufficientData() =>
+    array.size(prices) >= lookbackPeriod / 2
+
+// === DENSITY CALCULATION METHODS ===  
+calcKernelDensity(float priceLevel) =>
+    float bandwidth = priceranges / (numZones * 2)
+    float density = 0.0
+    float totalWeight = 0.0
+
+    for i = 0 to array.size(prices) - 1 by 1
+        float diff = (priceLevel - array.get(prices, i)) / bandwidth
+        float kernel = math.exp(-0.5 * math.pow(diff, 2))
+        float weight = array.get(volumes, i)
+        density := density + kernel * weight
+        totalWeight := totalWeight + weight
+        totalWeight
+
+    density / math.max(totalWeight, 1)
+
+calcExpKernelDensity(float priceLevel) =>
+    float bandwidth = priceranges / (numZones * 2)
+    float density = 0.0
+    float totalWeight = 0.0
+
+    for i = 0 to array.size(prices) - 1 by 1
+        float diff = (priceLevel - array.get(prices, i)) / bandwidth
+        float kernel = math.exp(-math.abs(diff))
+        float timeWeight = math.exp(-0.5 * (array.size(prices) - i - 1) / lookbackPeriod)
+        float weight = array.get(volumes, i) * timeWeight
+        density := density + kernel * weight
+        totalWeight := totalWeight + weight
+        totalWeight
+
+    density / math.max(totalWeight, 1)
+
+calcVolumeWeightedDensity(float priceLevel) =>
+    float bandwidth = priceranges / (numZones * 2)
+    float density = 0.0
+    float totalVolume = 0.0
+
+    for i = 0 to array.size(prices) - 1 by 1
+        float price = array.get(prices, i)
+        float vol = array.get(volumes, i)
+
+        if math.abs(price - priceLevel) <= bandwidth
+            float distance = 1.0 - math.abs(price - priceLevel) / bandwidth
+            density := density + vol * math.pow(distance, 2)
+            totalVolume := totalVolume + vol
+            totalVolume
+
+    density / math.max(totalVolume, 1)
+
+// === UPDATE ZONE LEVELS AND HEAT VALUES ===  
+for i = 0 to numZones by 1
+    zoneLevels.set(i, lowestPrice + i * zoneHeight)
+    if i < numZones
+        float zoneMiddle = lowestPrice + (i + 0.5) * zoneHeight
+        float heatValue = switch method
+            METHOD_KERNEL => calcKernelDensity(zoneMiddle)
+            METHOD_EXP => calcExpKernelDensity(zoneMiddle)
+            METHOD_VWAP => calcVolumeWeightedDensity(zoneMiddle)
+            => calcKernelDensity(zoneMiddle)
+        zoneHeat.set(i, heatValue)
+
+// === NORMALIZE HEAT VALUES ===  
+float maxHeat = array.max(zoneHeat)
+float minHeat = array.min(zoneHeat)
+
+// === TOOLTIPS ===  
+var density_tooltip = 'Density levels show price congestion zones. Red indicates high density areas, green shows low density regions.'
+var level_tooltip = 'Significant price levels where trading activity clusters.'
+var heat_tooltip = 'Overall heat distribution across the price range.'
+var method_tooltips = 'Heatmap Methods:\n' + '• Kernel Density: Standard Gaussian kernel for smooth distribution\n' + '• Exponential Kernel: Time-weighted density with recent price emphasis\n' + '• Volume-Weighted: Direct volume profile with distance weighting\n\n' + 'Color Guide:\n' + '🔴 Red (Highest Density)\n' + '  • Strong support/resistance zone\n' + '  • Price likely to pause or reverse\n' + '  • High volume trading area\n\n' + '🟡 Yellow (Medium Density)\n' + '  • Moderate support/resistance\n' + '  • Price may slow down\n' + '  • Average trading activity\n\n' + '🟢 Green (Lowest Density)\n' + '  • Low resistance area\n' + '  • Price likely to move freely\n' + '  • Fast price transitions'
+
+// === COLOR HANDLING ===  
+get_cell_color(value, max_val) =>
+    color_scale = array.from(color.new(#FF0000, 85), color.new(#FF4400, 85), color.new(#FF8800, 85), color.new(#FFCC00, 85), color.new(#FFFF00, 85), color.new(#CCFF00, 85), color.new(#88FF00, 85), color.new(#44FF00, 85), color.new(#00FF00, 85)) // High density   color.new(#FF4400, 85),   color.new(#FF8800, 85),   color.new(#FFCC00, 85),   color.new(#FFFF00, 85),   color.new(#CCFF00, 85),   color.new(#88FF00, 85),   color.new(#44FF00, 85),   color.new(#00FF00, 85)   // Low density   )  
+
+    index = math.floor(value / max_val * (array.size(color_scale) - 1))
+    index := math.min(math.max(index, 0), array.size(color_scale) - 1)
+    array.get(color_scale, index)
+
+// === PLOTTING ===  
+if barstate.islast and sufficientData()
+    // Clear old boxes  
+    while array.size(heatmapBoxes) > 0
+        box.delete(array.pop(heatmapBoxes))
+
+    // Plot new heatmap zones  
+    for i = 0 to numZones - 1 by 1
+        float normalizedHeat = normalize(array.get(zoneHeat, i), minHeat, maxHeat)
+        normalizedHeat := math.pow(normalizedHeat, sensitivity)
+
+        int colorIndex = math.floor(normalizedHeat * (array.size(heatColors) - 1))
+        colorIndex := math.min(math.max(colorIndex, 0), array.size(heatColors) - 1)
+
+        boxColor = array.get(heatColors, colorIndex)
+
+        newBox = box.new(left = bar_index - lookbackPeriod, top = array.get(zoneLevels, i + 1), right = bar_index, bottom = array.get(zoneLevels, i), bgcolor = boxColor, border_color = na)
+
+        array.push(heatmapBoxes, newBox)
+
+    // Clear old significant levels  
+    while array.size(significantLevels) > 0
+        line.delete(array.pop(significantLevels))
+
+    // Plot new significant levels  
+    float significanceThreshold = maxHeat * 0.8
+    for i = 0 to numZones - 1 by 1
+        if array.get(zoneHeat, i) > significanceThreshold
+            lineLevel = array.get(zoneLevels, i)
+            newLine = line.new(x1 = bar_index - lookbackPeriod, y1 = lineLevel, x2 = bar_index, y2 = lineLevel, color = color.new(color.white, 50), style = line.style_dashed)
+            array.push(significantLevels, newLine)
+
+    // === DASHBOARD ===  
+    var table dashboard = table.new(get_position(dashboard_position), 2, 4)
+
+    // Method name  
+    table.cell(dashboard, 0, 0, '𓄀 ' + method, bgcolor = color.new(#001757, 50), text_color = color.white, text_size = get_text_size(dashboard_size), text_font_family = font.family_monospace)
+    table.cell_set_tooltip(dashboard, 0, 0, method_tooltips)
+
+    // Maximum Density  
+    max_density = array.max(zoneHeat)
+    max_density_pct = max_density * 100
+    table.cell(dashboard, 0, 1, 'Max Density: ' + str.tostring(max_density_pct, '#.00') + '%', bgcolor = get_cell_color(max_density, max_density), text_color = color.white, text_size = get_text_size(dashboard_size), text_font_family = font.family_monospace)
+    table.cell_set_tooltip(dashboard, 0, 1, density_tooltip)
+
+    // Average Density  
+    avg_density = array.avg(zoneHeat)
+    avg_density_pct = avg_density * 100
+    table.cell(dashboard, 0, 2, 'Avg Density: ' + str.tostring(avg_density_pct, '#.00') + '%', bgcolor = get_cell_color(avg_density, max_density), text_color = color.white, text_size = get_text_size(dashboard_size), text_font_family = font.family_monospace)
+    table.cell_set_tooltip(dashboard, 0, 2, heat_tooltip)
+
+    // Significant Levels  
+    sig_levels = array.size(significantLevels)
+    table.cell(dashboard, 0, 3, 'Significant Levels: ' + str.tostring(sig_levels), bgcolor = color.new(#001757, 50), text_color = color.white, text_size = get_text_size(dashboard_size), text_font_family = font.family_monospace)
+    table.cell_set_tooltip(dashboard, 0, 3, level_tooltip)
+
+// Plot current price marker  
+plot(close, title = 'Current Price', color = color.white, style = plot.style_circles, linewidth = 2, show_last = 1)

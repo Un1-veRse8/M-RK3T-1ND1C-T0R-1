@@ -1,0 +1,67 @@
+// @ Julien_Eche
+
+//@version=5
+indicator("Kalman Synergy Oscillator", overlay=false)
+
+ps = input.source(close, "Price Source")
+lbp = 20
+pn = 10
+mn = 1
+
+var float[] se = array.new_float(5, na)
+var float[] ec = array.new_float(5, 100.0)
+
+f_init(series float ps) =>
+    if na(array.get(se, 0))
+        for i = 0 to 4
+            array.set(se, i, ps)
+            array.set(ec, i, 1.0)
+
+f_kalman(series float ps) =>
+    pse = array.new_float(5)
+    pec = array.new_float(5)
+    for i = 0 to 4
+        array.set(pse, i, array.get(se, i))
+        array.set(pec, i, array.get(ec, i) + pn)
+    
+    kg = array.new_float(5)
+    for i = 0 to 4
+        k = array.get(pec, i) / (array.get(pec, i) + mn)
+        array.set(kg, i, k)
+        array.set(se, i, array.get(pse, i) + k * (ps - array.get(pse, i)))
+        array.set(ec, i, (1 - k) * array.get(pec, i))
+    
+    array.get(se, 0)
+
+f_init(ps)
+kfp = f_kalman(ps)
+
+rs = ta.ema(ta.rsi(kfp, 14), 7)
+
+rl = ta.lowest(rs, lbp)
+rh = ta.highest(rs, lbp)
+nr = (rs - rl) / (rh - rl) - 0.5
+
+hh = ta.highest(kfp, 14)
+ll = ta.lowest(kfp, 14)
+wr = ta.ema((hh - kfp) / (hh - ll) * -100, 7)
+
+wh = ta.highest(wr, lbp)
+wl = ta.lowest(wr, lbp)
+nw = ((wr - wl) / (wh - wl) - 0.5)
+
+ci = nr > nw ? 0.6 * nr + 0.4 * nw : 0.4 * nr + 0.6 * nw
+
+pr = ci > ci[1]
+ngr = ci < ci[1]
+var color c = #008B8B
+if ci > 0 and pr
+    c := #00E5B0
+if ci > 0 and ngr
+    c := #008B8B
+if ci < 0 and ngr
+    c := #FF4136
+if ci < 0 and pr
+    c := #B22222
+
+plot(ci, "Oscillator", color=c, style=plot.style_line)

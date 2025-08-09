@@ -1,0 +1,57 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+// ==============================================================================
+// 🔍 Institutional MACD (Z-Score Edition)
+// — Classic MACD reengineered with full z-score normalization
+// — Highlights statistically significant momentum and divergence
+// — Designed for professional-grade breakout detection
+// © VolumeVigilante | Trade Smart. Trade Vigilantly.
+// ==============================================================================
+
+//@version=6
+indicator("Institutional MACD (Z-Score Edition) [VolumeVigilante]", overlay=false)
+
+// === 📥 INPUTS =================================================================
+fastLength       = input.int(12, title="MACD Fast Length", tooltip="Fast EMA length for MACD calculation (default: 12)")
+slowLength       = input.int(26, title="MACD Slow Length", tooltip="Slow EMA length for MACD calculation (default: 26)")
+signalLength     = input.int(9,  title="Signal Smoothing Length", tooltip="EMA smoothing length for the MACD signal line (default: 9)")
+src              = input.source(close, title="Source", tooltip="Input source for MACD (typically close price)")
+
+zScoreLength     = input.int(50, title="Z-Score Lookback Length", tooltip="Number of bars to look back for Z-Score normalization")
+zScoreThreshold  = input.float(1.0, minval=0.1, step=0.1, title="Z-Score Threshold Level", tooltip="Custom threshold for overbought/oversold zones and alert triggers")
+
+showZHistogram   = input.bool(true, title="Show Z-Scored Histogram", tooltip="Toggle display of the z-score normalized histogram (MACD - Signal)")
+showZLines       = input.bool(true, title="Show Z-Scored MACD Lines", tooltip="Toggle display of the z-score normalized MACD and Signal lines")
+showZBands       = input.bool(true, title="Show ±Z Threshold Bands", tooltip="Toggle display of Z-Score threshold bands")
+
+// === ⚙️ MACD CORE ==============================================================
+fastMA     = ta.ema(src, fastLength)
+slowMA     = ta.ema(src, slowLength)
+macdLine   = fastMA - slowMA
+signalLine = ta.ema(macdLine, signalLength)
+hist       = macdLine - signalLine
+
+// === 🧠 Z-SCORE TRANSFORMATION =================================================
+zHist    = (hist       - ta.sma(hist,       zScoreLength)) / ta.stdev(hist,       zScoreLength)
+macdZ    = (macdLine   - ta.sma(macdLine,   zScoreLength)) / ta.stdev(macdLine,   zScoreLength)
+signalZ  = (signalLine - ta.sma(signalLine, zScoreLength)) / ta.stdev(signalLine, zScoreLength)
+
+// === 🎨 VISUAL LOGIC: HISTOGRAM COLORING ======================================
+isRising  = zHist > zHist[1]
+histColor = zHist >= 0 ? (isRising ? #26A69A : #B2DFDB) : (isRising ? #FFCDD2 : #FF5252)
+
+// === 📊 PLOTS ==================================================================
+plot(showZHistogram ? zHist : na, title="Z-Score Histogram", style=plot.style_columns, color=histColor, linewidth=1)
+plot(showZLines ? macdZ : na,    title="Z-MACD Line",        color=#2962FF, linewidth=1)
+plot(showZLines ? signalZ : na,  title="Z-Signal Line",      color=#FF6D00, linewidth=1)
+
+// === 📈 REFERENCE LINES ========================================================
+hline(0, "Zero", color=color.new(#787B86, 50))
+plot(showZBands ? zScoreThreshold : na,  title="+Z Threshold", color=#26A69A, linewidth=1, style=plot.style_line)
+plot(showZBands ? -zScoreThreshold : na, title="-Z Threshold", color=#FF5252, linewidth=1, style=plot.style_line)
+
+// === 🚨 ALERTS ==================================================================
+alertcondition(zHist > zScoreThreshold,               title="Z-Score > Threshold",  message="Z-Score is above threshold (Overbought)")
+alertcondition(zHist < -zScoreThreshold,              title="Z-Score < Threshold",  message="Z-Score is below threshold (Oversold)")
+alertcondition(ta.crossover(zHist, 0),                title="Z-Score Bull Cross",   message="Z-Score crossed above 0")
+alertcondition(ta.crossunder(zHist, 0),               title="Z-Score Bear Cross",   message="Z-Score crossed below 0")

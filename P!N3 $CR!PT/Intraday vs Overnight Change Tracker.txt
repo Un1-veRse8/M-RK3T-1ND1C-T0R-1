@@ -1,0 +1,27 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TheUltimator5
+
+//@version=6
+indicator("Intraday vs Overnight Change Tracker", overlay=false)
+
+plotChoice = input.string("Intraday", title="Synthetic Price Type", options=["Intraday", "Overnight"])
+
+// === Return ratios
+intradayChange  = close / open
+overnightChange = open / close[1]
+
+// === Persistent synthetic price variables
+var float intradayPrice = na
+var float overnightPrice = na
+
+// === Safe initialization on bar 1
+if bar_index == 1
+    intradayPrice := close
+    overnightPrice := close
+else
+    intradayPrice  := intradayPrice * intradayChange
+    overnightPrice := overnightPrice * overnightChange
+
+// === Plot only the selected one
+plot(plotChoice == "Intraday"  ? intradayPrice  : na, title="Intraday",  color=color.orange,  linewidth=2)
+plot(plotChoice == "Overnight" ? overnightPrice : na, title="Overnight", color=color.fuchsia, linewidth=2)
