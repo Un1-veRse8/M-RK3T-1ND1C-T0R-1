@@ -1,0 +1,52 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © RWCS_LTD
+
+//@version=6
+indicator("Correlation Drift", overlay=false)
+
+// User Inputs
+corr_length = input.int(14, "Correlation Length", group = "Calculation Settings")
+plf_length = input.int(50, "PLF Length (Long)", group = "Calculation Settings")
+plf_length1 = input.int(14, "PLF Length (Short)", group = "Calculation Settings")
+smoothing = input.int(3, "Smoothing Factor", group = "Smoothing")
+benchmark = input.symbol("INDEX:BTCUSD", title="Benchmark Symbol", group = "Calculation Settings")
+
+// Z-Score Calculation Function
+fun_zscore(source, length) =>
+    mean = ta.sma(source, length)
+    std_dev = ta.stdev(source, length)
+    (source - mean)
+
+// Correlation Calculation
+benchmark_close = request.security(benchmark, timeframe.period, close)
+correlation_value = ta.correlation(close, benchmark_close, corr_length)
+
+// Calculating Z-Scores for Long and Short Periods
+z_long = fun_zscore(close, plf_length)
+z_short = fun_zscore(close, plf_length1)
+
+// Price Lag Factor Calculation (Dynamic Scaling)
+plf_raw = z_long - z_short
+
+// Normalizing the PLF using standard deviation
+plf = plf_raw / ta.stdev(plf_raw, plf_length)
+
+// Smoothing the PLF for better signal clarity
+plf_smooth = ta.hma(plf, smoothing)
+
+// Correlation/PLF Ratio Calculation
+corr_plf_ratio = correlation_value / plf_smooth
+
+// Clipping function to limit extreme values
+clip(value, min_val, max_val) =>
+    value > max_val ? max_val : value < min_val ? min_val : value
+
+// Applying the clip function to the correlation vs PLF ratio
+clipped_corr_plf_ratio = clip(corr_plf_ratio, -3, 3)
+
+// Gradient Color for Histogram
+colorG = clipped_corr_plf_ratio >= 0 ? clipped_corr_plf_ratio > clipped_corr_plf_ratio[1] ? color.aqua : color.teal : clipped_corr_plf_ratio < clipped_corr_plf_ratio[1] ? color.fuchsia : color.purple
+
+// Plotting the Correlation vs PLF Ratio as a Histogram
+plot(clipped_corr_plf_ratio, style=plot.style_histogram, color=colorG, linewidth=2, title="Correlation vs PLF Ratio Histogram")
+hline(0, "Zero Line", color=color.gray, linewidth=1)

@@ -1,0 +1,107 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Rocheur
+
+//@version=6
+indicator('Crosby Ratio | QuantumResearch ', overlay = false)
+
+
+//-----------------------------------------------------------------------------------------
+//    ___                    _                   ____                               _      |
+//   / _ \ _   _  __ _ _ __ | |_ _   _ _ __ ___ |  _ \ ___  ___  ___  __ _ _ __ ___| |__   |
+//  | | | | | | |/ _` | '_ \| __| | | | '_ ` _ \| |_) / _ \/ __|/ _ \/ _` | '__/ __| '_ \  |
+//  | |_| | |_| | (_| | | | | |_| |_| | | | | | |  _ <  __/\__ \  __/ (_| | | | (__| | | | |
+//   \__\_\\__,_|\__,_|_| |_|\__|\__,_|_| |_| |_|_| \_\___||___/\___|\__,_|_|  \___|_| |_| |
+//                                                                                         |
+//-----------------------------------------------------------------------------------------
+
+//-------------------------------------------------------------------------------------------Color Palette-----------------------------------------------------------------------------------------
+
+ColMode = input.string('Classic2', title = 'Color mode', group = 'Visual | 𝙌𝙪𝙖𝙣𝙩𝙪𝙢𝙍𝙚𝙨𝙚𝙖𝙧𝙘𝙝', options = ['Classic', 'Classic2', 'Classic3', 'Classic4', 'Classic5', 'Classic6', 'Classic7', 'Classic8'])
+
+[color_up, color_dn] = switch ColMode
+    'Classic' => [color.rgb(0, 255, 187), color.rgb(255, 0, 157)]
+    'Classic2' => [#10cab8, color.blue]
+    'Classic3' => [#5ffae0, #c22ed0]
+    'Classic4' => [#ffbb00, #770737]
+    'Classic5' => [#9618f7, #ff0078]
+    'Classic6' => [#dee2e6, #495057]
+    'Classic7' => [#049ef7, color.white]
+    'Classic8' => [#00ffdd, #ff0095]
+
+color col_up1 = color_up
+color col_up2 = color.new(color_up, 50)
+color col_dn1 = color_dn
+color col_dn2 = color.new(color_dn, 50)
+
+//-------------------------------------------------------------------------------------------Settings-----------------------------------------------------------------------------------------
+
+// Periode
+length = input.int(30, title = 'Length', minval = 1, group = 'Settings')
+// Atr value
+atr = ta.atr(length)
+
+Upper_threshold= input.float(18.0,title="Upper Threshold", group= "Thresholds")
+Lower_threshold= input.float(-15.0,title="Lower Threshold", group= "Thresholds")
+
+Show_bgcolor=input.bool(true, title="Show Background Color", group="Plot")
+
+//-------------------------------------------------------------------------------------------Smoothing-----------------------------------------------------------------------------------------
+
+// Heikin ashi 
+Heikin_ashi_close = (open + low + close + high) / 4
+
+Hclose = Heikin_ashi_close[barstate.isconfirmed ? 0 : 1]
+
+Smooth_heikin = math.avg(Hclose, Hclose[1], Hclose[2], Hclose[3], Hclose[4])
+//-------------------------------------------------------------------------------------------Formula----------------------------------------------------------------------------------------
+
+// Moving average 
+Ma = ta.sma(Smooth_heikin, length)
+
+height = Ma - Ma[1]
+
+// Atan function 
+
+atan2(y, x) =>
+    var float angle = 0.0
+    if x > 0
+        angle := math.atan(y / x)
+        angle
+    else
+        if x < 0 and y >= 0
+            angle := math.atan(y / x) + math.pi
+            angle
+        else
+            if x < 0 and y < 0
+                angle := math.atan(y / x) - math.pi
+                angle
+            else
+                if x == 0 and y > 0
+                    angle := math.pi / 2
+                    angle
+                else
+                    if x == 0 and y < 0
+                        angle := -math.pi / 2
+                        angle
+    angle
+
+Crosby_ratio = atan2(100 * height, length * atr) * 180 / (2 * math.pi)
+//-------------------------------------------------------------------------------------------Plotting-----------------------------------------------------------------------------------------
+
+//Upper band
+h1 = plot(13.464, display = display.none)
+h2 = plot(20.285, display = display.none)
+fill(h1, h2, 20.285, 13.464, na, color.new(col_up1, 75))
+
+//Lower band
+h3 = plot(-9.472, display = display.none)
+h4 = plot(-18.250, display = display.none)
+fill(h3, h4, -9.472, -18.250, color.new(col_dn1, 75), na)
+
+// Zero line
+hline(0, color = color.new(#917373, 59))
+
+
+color_ = Crosby_ratio > 0 ? color.from_gradient(Crosby_ratio, 0, 3, color(na), col_up1) : color.from_gradient(Crosby_ratio, -3, 0, col_dn1, color(na))
+plot(Crosby_ratio, color = color_, style = plot.style_line, linewidth = 2)
+bgcolor(color = Show_bgcolor==true? (Crosby_ratio > 18 ? col_up1 : Crosby_ratio < -15 ? col_dn1 : na):na, force_overlay = true)

@@ -1,0 +1,80 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=6
+indicator("Deviation over Deviation (DoD)", overlay=false, max_bars_back=500)
+
+// === USER INPUTS WITH TOOLTIPS ===
+devLen = input.int(18, "Deviation Lookback", minval=5, tooltip="Number of bars for standard deviation calculation. Controls sensitivity of volatility regime detection.")
+dodLen = input.int(19, "DoD Lookback", minval=5, tooltip="Number of bars for the moving average and stdev of deviation. Higher = smoother, lower = more responsive.")
+zThreshHi = input.float(2.2, "High DoD Z-Score Threshold", minval=0.5, step=0.1, tooltip="Z-score above which a rare high volatility event is detected.")
+zThreshLo = input.float(-1.9, "Low DoD Z-Score Threshold", maxval=0, step=0.1, tooltip="Z-score below which a rare low volatility event is detected.")
+srcOpt = input.string("Close", "Source", options=["Open", "High", "Low", "Close", "(H + L)/2", "(H + L + C)/3", "(O + H + L + C)/4", "(H + L + C)/4", "Vol: Volume", "Vol: Volume MA", "Vol: ATR", "Vol: Stdev", "Vol: Range", "VoVix Deviation"], tooltip="Select the data source for deviation calculation. VoVix Deviation uses volatility-of-volatility for advanced regime detection.")
+htf = input.timeframe("60", "Comparative (HTF) Timeframe", tooltip="Higher timeframe for comparative DoD Z-score. Used for multi-timeframe confirmation.")
+
+atr_fast = input.int(5, "VoVix Fast ATR", tooltip="ATR length for fast volatility in VoVix Deviation source.")
+atr_slow = input.int(34, "VoVix Slow ATR", tooltip="ATR length for slow volatility in VoVix Deviation source.")
+atr_stdev = input.int(21, "VoVix ATR Stdev", tooltip="ATR stdev window for VoVix Deviation normalization.")
+
+showInfoLabel = input(true, "Show Info Label", tooltip="Show a compact info label with all key regime and parameter info.")
+
+// === SOURCE SELECTION FUNCTION ===
+f_src(_srcOpt, _atr_fast, _atr_slow, _atr_stdev) =>
+    switch _srcOpt
+        "Open"              => open
+        "High"              => high
+        "Low"               => low
+        "Close"             => close
+        "(H + L)/2"         => (high + low) / 2
+        "(H + L + C)/3"     => (high + low + close) / 3
+        "(O + H + L + C)/4" => (open + high + low + close) / 4
+        "(H + L + C)/4"     => (high + low + close) / 4
+        "Vol: Volume"       => volume
+        "Vol: Volume MA"    => ta.sma(volume, 14)
+        "Vol: ATR"          => ta.atr(14)
+        "Vol: Stdev"        => ta.stdev(close, 14)
+        "Vol: Range"        => high - low
+        "VoVix Deviation"   => (ta.atr(_atr_fast) - ta.atr(_atr_slow)) / (ta.stdev(ta.atr(_atr_fast), _atr_stdev) + 1e-6)
+        => close
+
+// === MAIN TF DOD CALCULATION ===
+src = f_src(srcOpt, atr_fast, atr_slow, atr_stdev)
+dev      = ta.stdev(src, devLen)
+dev_sma  = ta.sma(dev, dodLen)
+dev_of_dev = ta.stdev(dev, dodLen)
+dod_z = dev_of_dev != 0 ? (dev - dev_sma) / dev_of_dev : 0
+
+// === HTF DOD Z-SCORE: SINGLE EXPRESSION ===
+htf_dod_z = request.security(syminfo.tickerid, htf, (ta.stdev(f_src(srcOpt, atr_fast, atr_slow, atr_stdev), devLen) - ta.sma(ta.stdev(f_src(srcOpt, atr_fast, atr_slow, atr_stdev), devLen), dodLen)) / (ta.stdev(ta.stdev(f_src(srcOpt, atr_fast, atr_slow, atr_stdev), devLen), dodLen) + 1e-6))
+// === SIGNALS ===
+rare_high = dod_z > zThreshHi
+rare_low  = dod_z < zThreshLo
+
+// === BEAUTIFUL, PROFESSIONAL DOD LINE ===
+dodColor = dod_z > zThreshHi ? color.red : dod_z < zThreshLo ? color.green : color.yellow
+htfColor = color.new(color.blue, 0)
+plot(dod_z, color=color.new(dodColor, 80), linewidth=8, title="DoD Glow")
+plot(dod_z, color=dodColor, linewidth=3, title="DoD Z-Score")
+plot(htf_dod_z, color=htfColor, linewidth=2, style=plot.style_stepline, title="HTF DoD Z-Score")
+
+hline(0, color=color.gray, linestyle=hline.style_dotted)
+hline(zThreshHi, color=color.red, linestyle=hline.style_dashed, title="High Threshold")
+hline(zThreshLo, color=color.green, linestyle=hline.style_dashed, title="Low Threshold")
+
+bgcolor(rare_high ? color.new(color.red, 85) : rare_low ? color.new(color.green, 85) : na, title="DoD Regime Highlight")
+
+plotshape(rare_high, style=shape.triangledown, location=location.top, color=color.red, size=size.tiny, title="Rare High DoD")
+plotshape(rare_low, style=shape.triangleup, location=location.bottom, color=color.green, size=size.tiny, title="Rare Low DoD")
+
+// === MOBILE/COMPACT INFO LABEL (TOP RIGHT) ===
+regimeTxt = rare_high ? "RARE HIGH ▲" : rare_low ? "RARE LOW ▼" : "Normal"
+infoText = "DoD: " + regimeTxt + " | Src: " + srcOpt + " | Dev: " + str.tostring(devLen) + " | DoD: " + str.tostring(dodLen) + " | Z: " + str.tostring(dod_z, "#.##") + " | HTF(" + htf + "): " + str.tostring(htf_dod_z, "#.##")
+
+if showInfoLabel
+    var label infoLabel = na
+    if na(infoLabel)
+        infoLabel := label.new(bar_index, 1.0, infoText, xloc.bar_index, yloc.price, color.new(color.black, 80), label.style_label_left, color.white, size.small)
+    label.set_xy(infoLabel, bar_index, 1.0)
+    label.set_text(infoLabel, infoText)
+    label.set_textcolor(infoLabel, rare_high ? color.red : rare_low ? color.lime : color.silver)
+    label.set_style(infoLabel, label.style_label_left)

@@ -1,0 +1,882 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Categorical Market Morphisms (CMM)", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=200)
+
+// ========================================
+// DETAILED INPUT SYSTEM WITH MARKET-SPECIFIC GUIDANCE
+// ========================================
+group_categorical = "🔮 Categorical Universe Parameters"
+universe_depth = input.int(3, "Universe Level (Type_n)", minval=1, maxval=5, group=group_categorical, 
+     tooltip="Categorical complexity depth • Type 1: Price only | Type 2: +Volume | Type 3: +Volatility | Type 4: +Momentum | Type 5: +RSI • CRYPTO: 4-5 | STOCKS: 3-4 | FOREX: 2-3")
+morphism_sensitivity = input.float(0.618, "Morphism Detection Threshold", minval=0.1, maxval=2.0, step=0.1, group=group_categorical, 
+     tooltip="Golden ratio optimal • Lower = more morphisms | Higher = only major transformations • CRYPTO: 0.382-0.618 | STOCKS: 0.618-1.0 | FOREX: 1.0-1.618")
+functorial_tolerance = input.float(0.146, "Functoriality Tolerance", minval=0.01, maxval=0.50, step=0.01, group=group_categorical, 
+     tooltip="φ⁻² = 0.146 optimal • Composition error tolerance • TRENDING: 0.1-0.2 | RANGING: 0.2-0.5 • Lower = stricter")
+categorical_memory = input.int(89, "Categorical Memory", minval=21, maxval=233, group=group_categorical, 
+     tooltip="Historical lookback • Use Fibonacci: 21,34,55,89,144,233 • SCALPING: 21-34 | SWING: 55-89 | POSITION: 144-233")
+
+group_homotopy = "∞ Homotopy Type Theory"
+path_equivalence_threshold = input.float(1.618, "Path Equivalence Threshold", minval=0.382, maxval=2.618, step=0.1, group=group_homotopy, 
+     tooltip="φ = 1.618 Golden Ratio • Path similarity threshold • VOLATILE: 2.0-2.618 | NORMAL: 1.618 | STABLE: 0.786-1.382")
+deformation_complexity = input.int(13, "Deformation Complexity", minval=3, maxval=21, group=group_homotopy, 
+     tooltip="Path deformation steps • Fibonacci optimal: 3,5,8,13,21 • Higher = smoother but slower")
+type_recursion_depth = input.int(5, "Type Universe Recursion", minval=1, maxval=8, group=group_homotopy, 
+     tooltip="Recursive analysis depth • 1-3: Fast | 4-6: Balanced | 7-8: Deep analysis")
+univalence_strength = input.float(2.618, "Univalence Axiom Strength", minval=1.0, maxval=5.0, step=0.1, group=group_homotopy, 
+     tooltip="φ² = 2.618 • Equivalent structure identification • Higher = more equivalences found")
+
+group_universal = "⚡ Universal Properties"
+detect_initial_objects = input.bool(true, "Initial Objects (Bottoms)", group=group_universal, 
+     tooltip="Detect market bottoms - unique morphisms TO all states • Best in: Trending markets")
+detect_terminal_objects = input.bool(true, "Terminal Objects (Tops)", group=group_universal, 
+     tooltip="Detect market tops - unique morphisms FROM all states • Best in: Overbought conditions")
+detect_products = input.bool(true, "Product Objects (Balance)", group=group_universal, 
+     tooltip="Detect equilibrium states - multi-dimensional balance • Best in: Range-bound markets")
+detect_coproducts = input.bool(true, "Coproduct Objects (Divergence)", group=group_universal, 
+     tooltip="Detect market bifurcations - branching possibilities • Best in: High volatility")
+
+group_visualization = "🌌 Visual Configuration"
+show_morphism_flow = input.bool(true, "Morphism Flow", group=group_visualization, 
+     tooltip="Categorical transformations visualization • Disable for cleaner chart")
+show_homotopy_paths = input.bool(true, "Homotopy Paths", group=group_visualization, 
+     tooltip="Path equivalence visualization • Shows arbitrage opportunities")
+show_functorial_levels = input.bool(true, "Functorial Levels", group=group_visualization, 
+     tooltip="Multi-timeframe structure preservation • Key S/R levels")
+show_consciousness_field = input.bool(true, "Consciousness Field", group=group_visualization, 
+     tooltip="Market self-awareness visualization • Fractal emergence patterns")
+cloud_lookback = input.int(20, "Cloud Lookback Bars", minval=20, maxval=50, group=group_visualization,
+     tooltip="How far back the consciousness cloud extends")
+visual_transparency = input.int(2, "Field Transparency", minval=1, maxval=25, group=group_visualization, 
+     tooltip="Overall opacity • 11-25: Bold | 1-10: Subtle")
+signal_style = input.string("Modern", "Signal Style", options=["Modern", "Classic", "Minimal"], group=group_visualization, 
+     tooltip="Visual theme • Modern: Full features | Classic: Traditional | Minimal: Clean")
+signal_transparency_input = input.int(90, "Signal & Line Transparency", minval=1, maxval=100, group=group_visualization,
+     tooltip="Controls transparency of signals and functorial lines • 50=Most transparent | 100=Most visible")
+color_scheme = input.string("Dark", "Color Scheme", options=["Dark", "Light", "Classic", "Neon"], group=group_visualization,
+     tooltip="Choose your preferred color theme")
+
+group_dashboard = "📊 Dashboard Configuration"
+show_main_dashboard = input.bool(true, "Main Analytics", group=group_dashboard)
+show_combined_monitor = input.bool(true, "Combined Signal Monitor & Metrics", group=group_dashboard)
+show_theory_guide = input.bool(true, "Theory Guide", group=group_dashboard)
+dashboard_size = input.string("Normal", "Dashboard Size", options=["Small", "Normal", "Large"], group=group_dashboard)
+
+group_alerts = "🔔 Alert Configuration"
+alert_on_initial = input.bool(true, "Alert on Initial Objects", group=group_alerts)
+alert_on_terminal = input.bool(true, "Alert on Terminal Objects", group=group_alerts)
+alert_on_products = input.bool(true, "Alert on Products", group=group_alerts)
+alert_on_consciousness = input.bool(true, "Alert on Consciousness", group=group_alerts)
+alert_cooldown = input.int(20, "Alert Cooldown (bars)", minval=5, maxval=100, group=group_alerts)
+
+// ========================================
+// TEXT SIZE FUNCTION
+// ========================================
+get_text_size() =>
+    switch dashboard_size
+        "Small" => size.tiny
+        "Large" => size.normal
+        => size.small
+
+// Global text size variable
+label_text_size = get_text_size()
+
+// ========================================
+// COLOR SCHEME SYSTEM
+// ========================================
+get_color_scheme(scheme) =>
+    switch scheme
+        "Light" =>
+            [#ffffff, #f5f5f5, #e0e0e0, #00897b, #d32f2f, #5e35b1, #ff6f00, #1976d2, #388e3c, #6a1b9a,
+             #000000, #212121, #616161, #9e9e9e]
+        "Classic" =>
+            [#1a1a1a, #2d2d2d, #404040, #008000, #ff0000, #0000ff, #ffa500, #00bfff, #32cd32, #9370db,
+             #ffffff, #f0f0f0, #c0c0c0, #808080]
+        "Neon" =>
+            [#000000, #0a0a0a, #1a1a1a, #00ff00, #ff0066, #00ffff, #ffff00, #ff00ff, #00ff99, #ff3399,
+             #ffffff, #f0f0ff, #e0e0ff, #c0c0ff]
+        => // Default "Dark"
+            [#0a0e17, #1a1e27, #2a2e37, #26a69a, #ef5350, #7c4dff, #ffa726, #42a5f5, #66bb6a, #ab47bc,
+             #ffffff, #e4e8eb, #9ca3af, #6b7280]
+
+// Apply color scheme
+[bg_dark, panel_bg, border_color, color_bullish, color_bearish, color_neutral, 
+ color_warning, color_info, color_success, color_consciousness,
+ text_bright, text_normal, text_muted, text_dim] = get_color_scheme(color_scheme)
+
+// ========================================
+// GLOBAL TA CALCULATIONS
+// ========================================
+// Pre-calculate all TA functions at global scope
+highest_20 = ta.highest(high, 20)
+lowest_20 = ta.lowest(low, 20)
+sma_50 = ta.sma(close, 50)
+atr_20 = ta.atr(20)
+rsi_14 = ta.rsi(close, 14)
+mom_14 = ta.mom(close, 14)
+volume_sma_50 = ta.sma(volume, 50)
+atr_sma_50 = ta.sma(atr_20, 50)
+stdev_close_20 = ta.stdev(close, 20)
+stdev_close_50 = ta.stdev(close, 50)
+stdev_volume_20 = ta.stdev(volume, 20)
+
+// Pre-calculate SMAs for functorial analysis
+sma_5 = ta.sma(close, 5)
+sma_13 = ta.sma(close, 13)
+sma_21 = ta.sma(close, 21)
+sma_34 = ta.sma(close, 34)
+sma_55 = ta.sma(close, 55)
+
+// Pre-calculate for homotopy analysis
+lookback_homotopy = math.min(deformation_complexity * 2, 40)
+corr_price_volume = ta.correlation(close, volume, lookback_homotopy)
+corr_price_rsi = ta.correlation(close, rsi_14, lookback_homotopy)
+corr_volume_atr = ta.correlation(volume, atr_20, lookback_homotopy)
+
+price_highest = ta.highest(close, lookback_homotopy)
+price_lowest = ta.lowest(close, lookback_homotopy)
+volume_highest = ta.highest(volume, lookback_homotopy)
+volume_lowest = ta.lowest(volume, lookback_homotopy)
+rsi_highest = ta.highest(rsi_14, lookback_homotopy)
+rsi_lowest = ta.lowest(rsi_14, lookback_homotopy)
+atr_highest = ta.highest(atr_20, lookback_homotopy)
+atr_lowest = ta.lowest(atr_20, lookback_homotopy)
+
+// Pre-calculate consciousness correlations
+micro_corr = ta.correlation(close, ta.sma(close, type_recursion_depth * 2), type_recursion_depth * 2)
+meso_corr = ta.correlation(close, ta.sma(close, type_recursion_depth * 5), type_recursion_depth * 5)
+macro_corr = ta.correlation(close, ta.sma(close, type_recursion_depth * 8), type_recursion_depth * 8)
+price_volume_sync = ta.correlation(close, volume, categorical_memory)
+volatility_awareness = ta.correlation(atr_20, math.abs(ta.change(close)), categorical_memory)
+
+// Global performance metrics
+var float overall_score = 0.0
+
+// Signal counters for the combined monitor
+var int product_count = 0
+var int coproduct_count = 0
+var int initial_count = 0
+var int terminal_count = 0
+
+// ========================================
+// MATHEMATICAL FOUNDATIONS
+// ========================================
+
+// Universe depth affects calculation complexity
+calculate_market_state(depth) =>
+    state = close
+    
+    if depth >= 2
+        volume_norm = volume / volume_sma_50
+        state := state * (1 + (volume_norm - 1) * 0.1)
+    
+    if depth >= 3
+        volatility = atr_20 / close
+        state := state * (1 + volatility * 0.05)
+    
+    if depth >= 4
+        momentum = mom_14 / close
+        state := state * (1 + momentum * 0.03)
+    
+    if depth >= 5
+        rsi = (rsi_14 - 50) / 50
+        state := state * (1 + rsi * 0.02)
+    
+    state
+
+// Current market state with universe depth
+market_state = calculate_market_state(universe_depth)
+// Store previous market state
+var float market_state_prev = na
+market_state_prev := nz(market_state[1], market_state)
+
+// ========================================
+// MORPHISM DETECTION ENGINE
+// ========================================
+detect_morphism(source, target, sensitivity) =>
+    if na(source) or na(target)
+        [false, 0.0]
+    else
+        // Normalize by recent range
+        recent_range = highest_20 - lowest_20
+        if recent_range == 0
+            recent_range := close * 0.01
+        
+        normalized_change = math.abs(target - source) / recent_range
+        
+        // Sensitivity affects decay rate
+        decay_rate = 3.0 / sensitivity
+        morphism_strength = math.exp(-normalized_change * decay_rate)
+        
+        // Dynamic threshold based on sensitivity
+        threshold = 0.3 - (sensitivity - 1.0) * 0.15
+        morphism_exists = morphism_strength > threshold
+        
+        [morphism_exists, morphism_strength]
+
+// Multi-dimensional morphism analysis
+[price_morphism, price_morph_strength] = detect_morphism(close[1], close, morphism_sensitivity)
+[state_morphism, state_morph_strength] = detect_morphism(market_state_prev, market_state, morphism_sensitivity * 0.8)
+[volume_morphism, volume_morph_strength] = detect_morphism(volume[1], volume, morphism_sensitivity * 1.2)
+
+// Composite morphism strength
+composite_morphism_strength = (price_morph_strength * 0.5 + state_morph_strength * 0.3 + volume_morph_strength * 0.2)
+composite_morphism_exists = composite_morphism_strength > (0.5 - (morphism_sensitivity - 1.0) * 0.15)
+
+// ========================================
+// FUNCTORIAL ANALYSIS
+// ========================================
+check_functorial_composition(f_ab, f_bc, f_ac, tolerance) =>
+    if na(f_ab) or na(f_bc) or na(f_ac)
+        [false, 1.0]
+    else
+        composition = f_bc * f_ab
+        direct = f_ac
+        
+        if math.abs(direct) < 0.001
+            [false, 1.0]
+        else
+            error = math.abs(composition - direct) / math.abs(direct)
+            is_functorial = error < tolerance
+            [is_functorial, error]
+
+// Multi-timeframe functorial analysis
+timeframes = array.from(5, 13, 21, 34, 55)
+functorial_errors = array.new<float>()
+
+for i = 0 to 2
+    tf1 = array.get(timeframes, i)
+    tf2 = array.get(timeframes, i + 1)
+    tf3 = array.get(timeframes, i + 2)
+
+    // Use pre-calculated SMAs
+    sma1 = tf1 == 5 ? sma_5 : tf1 == 13 ? sma_13 : tf1 == 21 ? sma_21 : tf1 == 34 ? sma_34 : sma_55
+    sma2 = tf2 == 5 ? sma_5 : tf2 == 13 ? sma_13 : tf2 == 21 ? sma_21 : tf2 == 34 ? sma_34 : sma_55
+    sma3 = tf3 == 5 ? sma_5 : tf3 == 13 ? sma_13 : tf3 == 21 ? sma_21 : tf3 == 34 ? sma_34 : sma_55
+    
+    if sma1 > 0 and sma2 > 0 and sma3 > 0
+        f_12 = sma2 / sma1
+        f_23 = sma3 / sma2
+        f_13 = sma3 / sma1
+        
+        [is_func, error] = check_functorial_composition(f_12, f_23, f_13, functorial_tolerance)
+        array.push(functorial_errors, error)
+
+functorial_integrity = 1.0
+if array.size(functorial_errors) > 0
+    avg_error = array.avg(functorial_errors)
+    functorial_integrity := math.max(0, 1.0 - avg_error)
+
+overall_functoriality = functorial_integrity > (1 - functorial_tolerance)
+
+// ========================================
+// HOMOTOPY PATH ANALYSIS
+// ========================================
+calculate_path_homotopy(path1, path2, threshold, path1_highest, path1_lowest, path2_highest, path2_lowest, correlation_val) =>
+    if na(path1) or na(path2)
+        [false, 0.0]
+    else
+        // Use pre-calculated values
+        path1_range = path1_highest - path1_lowest
+        path2_range = path2_highest - path2_lowest
+        
+        if path1_range == 0 or path2_range == 0
+            [false, 0.0]
+        else
+            // Calculate path distance with deformation complexity
+            total_distance = 0.0
+            total_weight = 0.0
+            
+            for i = 0 to math.min(deformation_complexity - 1, 20)
+                if bar_index > i
+                    weight = math.exp(-i / deformation_complexity)
+                    p1_norm = (path1[i] - path1_lowest) / path1_range
+                    p2_norm = (path2[i] - path2_lowest) / path2_range
+                    distance = math.abs(p1_norm - p2_norm)
+                    total_distance := total_distance + distance * weight
+                    total_weight := total_weight + weight
+            
+            avg_distance = total_weight > 0 ? total_distance / total_weight : 1.0
+            
+            // Combine correlation and distance
+            homotopy_score = (correlation_val + 1) / 2 * (1 - avg_distance)
+            
+            // Apply threshold with univalence strength
+            effective_threshold = 1 / (threshold * math.sqrt(univalence_strength))
+            is_homotopic = homotopy_score > effective_threshold
+            
+            [is_homotopic, homotopy_score]
+
+// Path homotopy detection
+[price_volume_homotopy, pv_score] = calculate_path_homotopy(close, volume, path_equivalence_threshold, price_highest, price_lowest, volume_highest, volume_lowest, corr_price_volume)
+[price_rsi_homotopy, pr_score] = calculate_path_homotopy(close, rsi_14, path_equivalence_threshold, price_highest, price_lowest, rsi_highest, rsi_lowest, corr_price_rsi)
+[volume_volatility_homotopy, vv_score] = calculate_path_homotopy(volume, atr_20, path_equivalence_threshold, volume_highest, volume_lowest, atr_highest, atr_lowest, corr_volume_atr)
+
+homotopy_detected = price_volume_homotopy or price_rsi_homotopy or volume_volatility_homotopy
+max_homotopy_score = math.max(pv_score, math.max(pr_score, vv_score))
+
+// ========================================
+// UNIVERSAL PROPERTY DETECTION
+// ========================================
+
+// Initial Object (Bottom) Detection
+detect_initial_object() =>
+    if not detect_initial_objects
+        [false, 0.0]
+    else
+        lookback = categorical_memory
+        
+        // Multi-factor analysis
+        is_local_low = low == ta.lowest(low, lookback)
+        oversold = rsi_14 < 30
+        volume_surge = volume > volume_sma_50 * 1.5
+        momentum_reversal = mom_14 < 0 and mom_14 > mom_14[1]
+        
+        // Morphism flow analysis
+        inward_morphisms = 0
+        for i = 1 to type_recursion_depth
+            if close[i] > close and volume[i] < volume
+                inward_morphisms := inward_morphisms + 1
+        
+        // Calculate strength
+        strength = 0.0
+        strength := strength + (is_local_low ? 0.3 : 0)
+        strength := strength + (oversold ? 0.2 : 0)
+        strength := strength + (volume_surge ? 0.2 : 0)
+        strength := strength + (momentum_reversal ? 0.2 : 0)
+        strength := strength + (inward_morphisms / type_recursion_depth * 0.1)
+        
+        is_initial = strength > 0.4 and composite_morphism_exists
+        [is_initial, strength]
+
+// Terminal Object (Top) Detection
+detect_terminal_object() =>
+    if not detect_terminal_objects
+        [false, 0.0]
+    else
+        lookback = categorical_memory
+        
+        // Multi-factor analysis
+        is_local_high = high == ta.highest(high, lookback)
+        overbought = rsi_14 > 70
+        volume_decline = volume < volume_sma_50 * 0.8
+        momentum_exhaustion = mom_14 > 0 and mom_14 < mom_14[1]
+        
+        // Morphism flow analysis
+        outward_morphisms = 0
+        for i = 1 to type_recursion_depth
+            if close[i] < close and volume[i] > volume
+                outward_morphisms := outward_morphisms + 1
+        
+        // Calculate strength
+        strength = 0.0
+        strength := strength + (is_local_high ? 0.3 : 0)
+        strength := strength + (overbought ? 0.2 : 0)
+        strength := strength + (volume_decline ? 0.2 : 0)
+        strength := strength + (momentum_exhaustion ? 0.2 : 0)
+        strength := strength + (outward_morphisms / type_recursion_depth * 0.1)
+        
+        is_terminal = strength > 0.4 and composite_morphism_exists
+        [is_terminal, strength]
+
+// Product Object (Equilibrium) Detection
+detect_product_object() =>
+    if not detect_products
+        [false, 0.0]
+    else
+        lookback = deformation_complexity * 2
+        
+        // Balance metrics
+        price_stability = stdev_close_20 / ta.sma(close, lookback) < 0.02
+        volume_consistency = stdev_volume_20 / ta.sma(volume, lookback) < 0.5
+        low_volatility = atr_20 < atr_sma_50 * 0.7
+        neutral_rsi = math.abs(rsi_14 - 50) < 10
+        
+        // Functorial preservation
+        high_functoriality = functorial_integrity > 0.8
+        
+        strength = 0.0
+        strength := strength + (price_stability ? 0.25 : 0)
+        strength := strength + (volume_consistency ? 0.2 : 0)
+        strength := strength + (low_volatility ? 0.2 : 0)
+        strength := strength + (neutral_rsi ? 0.2 : 0)
+        strength := strength + (high_functoriality ? 0.15 : 0)
+        
+        is_product = strength > 0.5
+        [is_product, strength]
+
+// Coproduct Object (Divergence) Detection
+detect_coproduct_object() =>
+    if not detect_coproducts
+        [false, 0.0]
+    else
+        lookback = categorical_memory
+        
+        // Divergence metrics
+        volatility_spike = atr_20 > atr_sma_50 * 1.5
+        volume_anomaly = volume > volume_sma_50 * 2 or volume < volume_sma_50 * 0.5
+        price_breakout = math.abs(close - sma_50) > stdev_close_50 * 2
+        directional_uncertainty = math.abs(rsi_14 - 50) < 20 and volatility_spike
+        
+        // Functorial breakdown
+        low_functoriality = functorial_integrity < 0.3
+        
+        strength = 0.0
+        strength := strength + (volatility_spike ? 0.25 : 0)
+        strength := strength + (volume_anomaly ? 0.2 : 0)
+        strength := strength + (price_breakout ? 0.2 : 0)
+        strength := strength + (directional_uncertainty ? 0.2 : 0)
+        strength := strength + (low_functoriality ? 0.15 : 0)
+        
+        is_coproduct = strength > 0.4
+        [is_coproduct, strength]
+
+// Execute universal property detection
+[is_initial_object, initial_strength] = detect_initial_object()
+[is_terminal_object, terminal_strength] = detect_terminal_object()
+[is_product_object, product_strength] = detect_product_object()
+[is_coproduct_object, coproduct_strength] = detect_coproduct_object()
+
+// ========================================
+// CONSCIOUSNESS DETECTION
+// ========================================
+detect_market_consciousness() =>
+    if not show_consciousness_field
+        [false, 0.0]
+    else
+        // Fractal dimension
+        highs = ta.highest(high, categorical_memory)
+        lows = ta.lowest(low, categorical_memory)
+        range_ratio = (highs - lows) / ta.sma(close, categorical_memory)
+        fractal_score = math.log(range_ratio) / math.log(categorical_memory)
+        
+        // Aggregate consciousness
+        consciousness_level = 0.0
+        consciousness_level := consciousness_level + math.abs(micro_corr) * 0.2
+        consciousness_level := consciousness_level + math.abs(meso_corr) * 0.2
+        consciousness_level := consciousness_level + math.abs(macro_corr) * 0.2
+        consciousness_level := consciousness_level + math.abs(price_volume_sync) * 0.2
+        consciousness_level := consciousness_level + math.abs(volatility_awareness) * 0.1
+        consciousness_level := consciousness_level + math.min(fractal_score, 1) * 0.1
+        
+        // Apply univalence strength
+        consciousness_level := consciousness_level * (1 + (univalence_strength - 2.618) * 0.1)
+        
+        is_conscious = consciousness_level > 0.1  // Almost always active for testing
+        [is_conscious, consciousness_level]
+
+[consciousness_active, consciousness_level] = detect_market_consciousness()
+
+// ========================================
+// SIGNAL GENERATION WITH COOLDOWN
+// ========================================
+var int last_initial_bar = -alert_cooldown
+var int last_terminal_bar = -alert_cooldown
+var int last_product_bar = -alert_cooldown
+var int last_coproduct_bar = -alert_cooldown
+
+signal_initial = is_initial_object and (bar_index - last_initial_bar) > alert_cooldown
+signal_terminal = is_terminal_object and (bar_index - last_terminal_bar) > alert_cooldown
+signal_product = is_product_object and (bar_index - last_product_bar) > alert_cooldown
+signal_coproduct = is_coproduct_object and (bar_index - last_coproduct_bar) > alert_cooldown
+
+if signal_initial
+    last_initial_bar := bar_index
+    initial_count += 1
+if signal_terminal
+    last_terminal_bar := bar_index
+    terminal_count += 1
+if signal_product
+    last_product_bar := bar_index
+    product_count += 1
+if signal_coproduct
+    last_coproduct_bar := bar_index
+    coproduct_count += 1
+
+// ========================================
+// ALERT CONDITIONS (GLOBAL SCOPE)
+// ========================================
+alertcondition(signal_initial and alert_on_initial, "CMM: Initial Object", "Bottom formation detected - Initial object")
+alertcondition(signal_terminal and alert_on_terminal, "CMM: Terminal Object", "Top formation detected - Terminal object")
+alertcondition(signal_product and alert_on_products, "CMM: Product State", "Market equilibrium detected - Product object")
+alertcondition(signal_coproduct and alert_on_products, "CMM: Coproduct State", "Market divergence detected - Coproduct")
+alertcondition(consciousness_active and alert_on_consciousness, "CMM: Consciousness Active", "Market consciousness detected")
+alertcondition(not overall_functoriality and functorial_integrity < 0.3, "CMM: Functorial Breakdown", "Severe functorial breakdown - market structure failing")
+alertcondition(composite_morphism_strength > 0.8, "CMM: Strong Morphism", "Strong categorical morphism detected")
+alertcondition(homotopy_detected and max_homotopy_score > 0.7, "CMM: Homotopy Arbitrage", "Path equivalence arbitrage opportunity")
+
+// ========================================
+// VISUALIZATION SYSTEM - CONSISTENT SUBTLE VISUALS
+// ========================================
+
+// Signal labels for Initial and Terminal - BULL/BEAR ICONS ONLY
+signal_alpha = 100 - signal_transparency_input  // Convert to transparency
+
+if signal_initial
+    label_text = signal_style == "Modern" ? "🐂 INITIAL\n▲ " + str.tostring(initial_strength * 60, "#") + "%" : signal_style == "Classic" ? "BULL INITIAL\n" + str.tostring(initial_strength * 60, "#") + "%" : "🐂"
+    label.new(bar_index, low * 0.995, label_text, color=color.new(color_bullish, signal_alpha), style=label.style_label_up, textcolor=text_bright, size=label_text_size)
+
+if signal_terminal
+    label_text = signal_style == "Modern" ? "🐻 TERMINAL\n▼ " + str.tostring(terminal_strength * 60, "#") + "%" : signal_style == "Classic" ? "BEAR TERMINAL\n" + str.tostring(terminal_strength * 60, "#") + "%" : "🐻"
+    label.new(bar_index, high * 1.005, label_text, color=color.new(color_bearish, signal_alpha), style=label.style_label_down, textcolor=text_bright, size=label_text_size)
+
+// Create series for plotting Product/Coproduct circles
+product_plot = signal_product ? close : na
+coproduct_plot = signal_coproduct ? close : na
+
+// Product and Coproduct circles - GLOWING EFFECT WITH TWO CIRCLES
+plotshape(product_plot, "Product Signal", shape.circle, location.absolute, color=color.new(color_neutral, signal_alpha), size=size.tiny)
+plotshape(product_plot, "Product BG", shape.circle, location.absolute, color=color.new(color_neutral, signal_alpha + 10), size=size.small, offset=0)
+
+plotshape(coproduct_plot, "Coproduct Signal", shape.circle, location.absolute, color=color.new(color_warning, signal_alpha), size=size.tiny)
+plotshape(coproduct_plot, "Coproduct BG", shape.circle, location.absolute, color=color.new(color_warning, signal_alpha + 10), size=size.small, offset=0)
+
+// SUBTLE MORPHISM VISUALIZATION
+if show_morphism_flow
+    flow_strength = math.max(0.3, composite_morphism_strength)
+    flow_color = close > close[1] ? color_bullish : color_bearish
+    
+    // Consistent transparency with other visuals
+    base_transparency = 100 - visual_transparency  // Same as consciousness field
+    
+    // MAIN MORPHISM BEAM
+    beam_width = math.round(flow_strength * 8) + 2
+    
+    for i = 1 to math.min(type_recursion_depth + 2, 8)
+        if bar_index > i
+            alpha = base_transparency + 30 + i * 8
+            beam_thickness = math.max(1, beam_width - i)
+            
+            line.new(bar_index - i, close[i], bar_index, close, color=color.new(flow_color, math.min(70, alpha)), width=beam_thickness, style=line.style_solid)
+
+ // MORPHISM ENERGY FIELD - Just slightly more visible
+    if flow_strength > 0.1
+        energy_range = atr_20 * flow_strength * 1.5 
+        energy_transparency = math.max(10, base_transparency - 15)
+        
+        box.new(bar_index - type_recursion_depth, close + energy_range, bar_index, close - energy_range, bgcolor=color.new(flow_color, energy_transparency), border_color=color.new(flow_color, math.max(5, energy_transparency - 5)), border_width=1)     
+
+    // MORPHISM PARTICLES
+    for i = 1 to type_recursion_depth
+        if bar_index > i and i % 2 == 0
+            particle_size = flow_strength > 0.7 ? size.small : size.tiny
+            label.new(bar_index - i, (close + close[i]) / 2, "●", color=color.new(flow_color, math.min(50, base_transparency)), textcolor=color.new(flow_color, math.min(40, base_transparency - 5)), style=label.style_none, size=particle_size)
+
+// Homotopy path visualization - SUBTLE BLUE BOXES
+if show_homotopy_paths
+    path_range = atr_20 * math.max(0.3, max_homotopy_score) * 1.2
+    base_transparency = 100 - visual_transparency  // Same transparency as others
+    
+    // Create subtle gradient effect
+    for i = 0 to 2
+        box_transparency = base_transparency + i * 2.5  // Gradual fade
+        box_height = path_range * (1 - i * 0.2)
+        
+        box.new(bar_index - deformation_complexity, close + box_height, bar_index, close - box_height, 
+               bgcolor=color.new(color_info, box_transparency), 
+               border_color=color.new(color_info, box_transparency - 5), 
+               border_width=1)
+
+// Consciousness field - FIXED LOOKBACK
+if show_consciousness_field
+    consciousness_range = atr_20 * math.max(0.3, consciousness_level) * 1.2
+    consciousness_color = color.purple
+    
+    bars_back = cloud_lookback  // Use the input directly
+    base_transparency = 100 - visual_transparency
+    
+    if bars_back > 0
+        grid_size = math.max(5, math.floor(bars_back / 8))  // Adaptive grid size
+        
+        for i = 0 to 7  // Fixed number of segments
+            start_bar = bar_index - bars_back + (i * grid_size)
+            end_bar = bar_index - bars_back + ((i + 1) * grid_size)
+            
+            if start_bar >= 0 and end_bar <= bar_index
+                grid_transparency = base_transparency + (i * 2)
+                
+                box.new(start_bar, close + consciousness_range, end_bar, close - consciousness_range, 
+                       bgcolor=color.new(consciousness_color, math.min(95, grid_transparency)), 
+                       border_color=color.new(consciousness_color, math.min(90, grid_transparency - 5)), 
+                       border_width=1)
+
+// Functorial structure levels - IMPROVED SPACING AND LOGIC
+var line[] functorial_lines = array.new<line>()
+var label[] functorial_labels = array.new<label>()
+
+if show_functorial_levels and barstate.islast
+    // Clear existing lines and labels
+    if array.size(functorial_lines) > 0
+        for i = array.size(functorial_lines) - 1 to 0
+            line.delete(array.get(functorial_lines, i))
+        array.clear(functorial_lines)
+    
+    if array.size(functorial_labels) > 0
+        for i = array.size(functorial_labels) - 1 to 0
+            label.delete(array.get(functorial_labels, i))
+        array.clear(functorial_labels)
+    
+    // Only show lines if they have meaningful separation
+    sma_values = array.from(sma_5, sma_13, sma_21, sma_34, sma_55)
+    sma_labels = array.from("5", "13", "21", "34", "55")
+    
+    // Calculate minimum separation (0.1% of price)
+    min_separation = close * 0.001
+    
+    levels_to_show = math.min(universe_depth, 5)
+    transparency = 100 - signal_transparency_input
+    
+    displayed_lines = 0
+    var float last_value = na
+    
+    for i = 0 to levels_to_show - 1
+        level_value = array.get(sma_values, i)
+        level_label = array.get(sma_labels, i)
+        
+        // Only show if sufficiently separated from last line
+        show_line = na(last_value) or math.abs(level_value - last_value) > min_separation
+        
+        if show_line and displayed_lines < 3  // Max 3 lines to avoid clutter
+            level_color = functorial_integrity > 0.8 ? color_success : functorial_integrity > 0.5 ? color_warning : color_bearish
+            
+            // Background glow line
+            glow_line = line.new(bar_index - 2, level_value, bar_index + 35, level_value, color=color.new(level_color, transparency + 15), width=2, style=line.style_solid)
+            array.push(functorial_lines, glow_line)
+            
+            // Main line
+            main_line = line.new(bar_index - 2, level_value, bar_index + 35, level_value, color=color.new(level_color, transparency), width=1, style=line.style_solid)
+            array.push(functorial_lines, main_line)
+            
+            // Label on the right
+            level_label_obj = label.new(bar_index + 35, level_value, "Functorial Lines: " + level_label, 
+                                       color=color.new(level_color, 20), 
+                                       textcolor=text_bright, 
+                                       style=label.style_label_left, 
+                                       size=size.small)
+            array.push(functorial_labels, level_label_obj)
+            
+            last_value := level_value
+            displayed_lines += 1
+
+// ========================================
+// DASHBOARD SYSTEM
+// ========================================
+
+// 1. MAIN ANALYTICS DASHBOARD
+if show_main_dashboard and barstate.islast
+    var table main_dash = table.new(position.top_right, 2, 11, bgcolor=color.new(panel_bg, 30), border_color=border_color, border_width=1)
+    
+    // Header
+    table.merge_cells(main_dash, 0, 0, 1, 0)
+    table.cell(main_dash, 0, 0, "🔮 CATEGORICAL MARKET MORPHISMS", text_color=text_bright, text_size=label_text_size, bgcolor=bg_dark)
+    
+    // Market State
+    state = is_initial_object ? "INITIAL OBJECT" : is_terminal_object ? "TERMINAL OBJECT" : is_product_object ? "PRODUCT STATE" : is_coproduct_object ? "COPRODUCT STATE" : "ANALYZING"
+    state_color = is_initial_object ? color_bullish : is_terminal_object ? color_bearish : is_product_object ? color_neutral : is_coproduct_object ? color_warning : text_muted
+    table.cell(main_dash, 0, 1, "Market State", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 1, state, text_color=state_color, text_size=label_text_size)
+    
+    // Universe Level
+    universe_text = "Type " + str.tostring(universe_depth) + " (" + (universe_depth == 1 ? "Price" : universe_depth == 2 ? "Price+Vol" : universe_depth == 3 ? "+Volatility" : universe_depth == 4 ? "+Momentum" : "Full") + ")"
+    table.cell(main_dash, 0, 2, "Universe", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 2, universe_text, text_color=text_normal, text_size=label_text_size)
+    
+    // Morphism Analysis
+    morph_state = composite_morphism_exists ? "ACTIVE" : "DORMANT"
+    morph_text = morph_state + " (" + str.tostring(composite_morphism_strength * 100, "#") + "%)"
+    table.cell(main_dash, 0, 3, "Morphisms", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 3, morph_text, text_color=composite_morphism_exists ? color_success : text_dim, text_size=label_text_size)
+    
+    // Functorial Integrity
+    func_state = overall_functoriality ? "PRESERVED" : "VIOLATED"
+    func_text = func_state + " (" + str.tostring(functorial_integrity * 100, "#") + "%)"
+    table.cell(main_dash, 0, 4, "Functoriality", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 4, func_text, text_color=overall_functoriality ? color_success : color_bearish, text_size=label_text_size)
+    
+    // Homotopy Status
+    homo_text = homotopy_detected ? "DETECTED (" + str.tostring(max_homotopy_score * 100, "#") + "%)" : "NONE"
+    table.cell(main_dash, 0, 5, "Homotopy", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 5, homo_text, text_color=homotopy_detected ? color_info : text_dim, text_size=label_text_size)
+    
+    // Consciousness Level
+    cons_state = consciousness_active ? "ACTIVE" : consciousness_level > 0.5 ? "EMERGING" : "DORMANT"
+    cons_text = cons_state + " (" + str.tostring(consciousness_level * 100, "#") + "%)"
+    table.cell(main_dash, 0, 6, "Consciousness", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 6, cons_text, text_color=consciousness_active ? color_consciousness : text_dim, text_size=label_text_size)
+    
+    // Signal Strength
+    current_strength = is_initial_object ? initial_strength : is_terminal_object ? terminal_strength : is_product_object ? product_strength : is_coproduct_object ? coproduct_strength : 0
+    sig_text = current_strength > 0 ? str.tostring(current_strength * 100, "#") + "%" : "---"
+    table.cell(main_dash, 0, 7, "Signal Strength", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 7, sig_text, text_color=current_strength > 0.8 ? color_success : current_strength > 0.6 ? color_warning : text_dim, text_size=label_text_size)
+    
+    // Trend Analysis
+    trend = close > sma_50 ? "BULLISH" : "BEARISH"
+    trend_strength_val = math.abs(close - sma_50) / sma_50 * 100
+    trend_text = trend + " (" + str.tostring(trend_strength_val, "#.#") + "%)"
+    table.cell(main_dash, 0, 8, "Trend", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 8, trend_text, text_color=trend == "BULLISH" ? color_bullish : color_bearish, text_size=label_text_size)
+    
+    // Active Signals Count
+    active_count = (is_initial_object ? 1 : 0) + (is_terminal_object ? 1 : 0) + (is_product_object ? 1 : 0) + (is_coproduct_object ? 1 : 0)
+    table.cell(main_dash, 0, 9, "Active Signals", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 9, str.tostring(active_count), text_color=active_count > 0 ? text_bright : text_dim, text_size=label_text_size)
+    
+    // Active Parameters Display
+    table.cell(main_dash, 0, 10, "Active Params", text_color=text_muted, text_size=label_text_size)
+    table.cell(main_dash, 1, 10, "FT:" + str.tostring(functorial_tolerance, "#.###") + 
+               " CM:" + str.tostring(categorical_memory) + 
+               " UA:" + str.tostring(univalence_strength, "#.#"), 
+               text_color=text_dim, text_size=label_text_size)
+
+// 2. COMBINED SIGNAL MONITOR & PERFORMANCE METRICS
+if show_combined_monitor and barstate.islast
+    var table combined_dash = table.new(position.middle_left, 3, 20, bgcolor=color.new(panel_bg, 30), border_color=border_color, border_width=1)
+    
+    // Header
+    table.merge_cells(combined_dash, 0, 0, 2, 0)
+    table.cell(combined_dash, 0, 0, "🎯 SIGNAL MONITOR & METRICS", text_color=text_bright, text_size=label_text_size, bgcolor=bg_dark)
+    
+    // Section 1: Active Signals
+    table.merge_cells(combined_dash, 0, 1, 2, 1)
+    table.cell(combined_dash, 0, 1, "── ACTIVE SIGNALS ──", text_color=color_info, text_size=label_text_size)
+    
+    // Column headers
+    table.cell(combined_dash, 0, 2, "Signal", text_color=text_muted, text_size=label_text_size)
+    table.cell(combined_dash, 1, 2, "Status", text_color=text_muted, text_size=label_text_size)
+    table.cell(combined_dash, 2, 2, "Count", text_color=text_muted, text_size=label_text_size)
+    
+    row = 3
+    
+    // Initial Object
+    table.cell(combined_dash, 0, row, "INITIAL", text_color=text_muted, text_size=label_text_size)
+    table.cell(combined_dash, 1, row, is_initial_object ? "▲ " + str.tostring(initial_strength * 100, "#") + "%" : "---", 
+               text_color=is_initial_object ? color_bullish : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, str.tostring(initial_count), text_color=text_normal, text_size=label_text_size)
+    row += 1
+    
+    // Terminal Object
+    table.cell(combined_dash, 0, row, "TERMINAL", text_color=text_muted, text_size=label_text_size)
+    table.cell(combined_dash, 1, row, is_terminal_object ? "▼ " + str.tostring(terminal_strength * 100, "#") + "%" : "---", 
+               text_color=is_terminal_object ? color_bearish : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, str.tostring(terminal_count), text_color=text_normal, text_size=label_text_size)
+    row += 1
+    
+    // Product Object
+    table.cell(combined_dash, 0, row, "PRODUCT", text_color=text_muted, text_size=label_text_size)
+    table.cell(combined_dash, 1, row, is_product_object ? "◆ " + str.tostring(product_strength * 100, "#") + "%" : "---", 
+               text_color=is_product_object ? color_neutral : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, str.tostring(product_count), text_color=text_normal, text_size=label_text_size)
+    row += 1
+    
+    // Coproduct Object
+    table.cell(combined_dash, 0, row, "COPRODUCT", text_color=text_muted, text_size=label_text_size)
+    table.cell(combined_dash, 1, row, is_coproduct_object ? "◇ " + str.tostring(coproduct_strength * 100, "#") + "%" : "---", 
+               text_color=is_coproduct_object ? color_warning : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, str.tostring(coproduct_count), text_color=text_normal, text_size=label_text_size)
+    row += 1
+    
+    // Separator
+    table.merge_cells(combined_dash, 0, row, 2, row)
+    table.cell(combined_dash, 0, row, "── PERFORMANCE METRICS ──", text_color=color_warning, text_size=label_text_size)
+    row += 1
+    
+    // CCI - Categorical Coherence Index
+    cci = functorial_integrity * (composite_morphism_exists ? 1.0 : 0.5)
+    table.cell(combined_dash, 0, row, "CCI", text_color=text_muted, text_size=label_text_size, tooltip="Categorical Coherence Index")
+    table.cell(combined_dash, 1, row, str.tostring(cci, "#.##"), text_color=cci > 0.7 ? color_success : cci > 0.4 ? color_warning : color_bearish, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, cci > 0.7 ? "STRONG" : cci > 0.4 ? "MODERATE" : "WEAK", text_color=text_dim, text_size=label_text_size)
+    row += 1
+    
+    // HPA - Homotopy Path Alignment
+    hpa = max_homotopy_score * functorial_integrity
+    table.cell(combined_dash, 0, row, "HPA", text_color=text_muted, text_size=label_text_size, tooltip="Homotopy Path Alignment")
+    table.cell(combined_dash, 1, row, str.tostring(hpa, "#.##"), text_color=hpa > 0.6 ? color_success : hpa > 0.3 ? color_warning : color_bearish, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, hpa > 0.6 ? "ALIGNED" : hpa > 0.3 ? "PARTIAL" : "WEAK", text_color=text_dim, text_size=label_text_size)
+    row += 1
+    
+    // UPRR - Universal Property Recognition Rate
+    uprr = ((is_initial_object ? 1 : 0) + (is_terminal_object ? 1 : 0) + (is_product_object ? 1 : 0) + (is_coproduct_object ? 1 : 0)) / 4.0
+    table.cell(combined_dash, 0, row, "UPRR", text_color=text_muted, text_size=label_text_size, tooltip="Universal Property Recognition Rate")
+    table.cell(combined_dash, 1, row, str.tostring(uprr * 100, "#") + "%", text_color=uprr > 0.5 ? color_success : uprr > 0.25 ? color_warning : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, str.tostring(math.round(uprr * 4), "#") + "/4", text_color=text_dim, text_size=label_text_size)
+    row += 1
+    
+    // TEPF - Transcendence Emergence Probability Factor
+    tepf = max_homotopy_score * consciousness_level * 1.618
+    table.cell(combined_dash, 0, row, "TEPF", text_color=text_muted, text_size=label_text_size, tooltip="Transcendence Emergence Probability")
+    table.cell(combined_dash, 1, row, str.tostring(tepf, "#.##"), text_color=tepf > 0.8 ? color_consciousness : tepf > 0.4 ? color_warning : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, tepf > 0.8 ? "HIGH" : tepf > 0.4 ? "MEDIUM" : "LOW", text_color=text_dim, text_size=label_text_size)
+    row += 1
+    
+    // MSI - Morphological Stability Index
+    msi = (universe_depth / 5.0) * functorial_integrity * consciousness_level
+    table.cell(combined_dash, 0, row, "MSI", text_color=text_muted, text_size=label_text_size, tooltip="Morphological Stability Index")
+    table.cell(combined_dash, 1, row, str.tostring(msi, "#.##"), text_color=msi > 0.5 ? color_success : msi > 0.25 ? color_warning : text_dim, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, msi > 0.5 ? "STABLE" : msi > 0.25 ? "NEUTRAL" : "UNSTABLE", text_color=text_dim, text_size=label_text_size)
+    row += 1
+    
+    // Overall Score
+    overall_score := (cci + hpa + uprr + tepf + msi) / 5.0
+    table.cell(combined_dash, 0, row, "OVERALL", text_color=text_bright, text_size=label_text_size)
+    table.cell(combined_dash, 1, row, str.tostring(overall_score * 100, "#") + "%", text_color=overall_score > 0.7 ? color_success : overall_score > 0.4 ? color_warning : color_bearish, text_size=label_text_size)
+    table.cell(combined_dash, 2, row, overall_score > 0.7 ? "EXCELLENT" : overall_score > 0.4 ? "GOOD" : "POOR", text_color=text_bright, text_size=label_text_size)
+    row += 1
+
+
+// 3. THEORY GUIDE
+if show_theory_guide and barstate.islast
+    var table theory_dash = table.new(position.bottom_right, 1, 12, bgcolor=color.new(panel_bg, 30), border_color=border_color, border_width=1)
+    
+    table.cell(theory_dash, 0, 0, "📚 CATEGORICAL THEORY", text_color=text_bright, text_size=label_text_size, bgcolor=bg_dark)
+    table.cell(theory_dash, 0, 1, "", bgcolor=bg_dark, height=1)
+    table.cell(theory_dash, 0, 2, "OBJECTS & MORPHISMS:", text_color=color_info, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 3, "• Objects = Market states", text_color=text_muted, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 4, "• Morphisms = State transitions", text_color=text_muted, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 5, "• Functors preserve structure", text_color=text_muted, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 6, "", bgcolor=bg_dark, height=1)
+    table.cell(theory_dash, 0, 7, "UNIVERSAL PROPERTIES:", text_color=color_warning, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 8, "• Initial → Market bottoms", text_color=text_muted, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 9, "• Terminal → Market tops", text_color=text_muted, text_size=label_text_size, text_halign=text.align_left)
+    table.cell(theory_dash, 0, 10, "• Products → Equilibrium", text_color=text_muted, text_size=label_text_size, text_halign=text.align_left)
+
+    // Dynamic advice based on current state
+    advice = is_initial_object ? "💡 Bottom formation - Consider long" : 
+             is_terminal_object ? "💡 Top formation - Consider short" : 
+             is_product_object ? "💡 Range-bound - Wait for breakout" : 
+             is_coproduct_object ? "💡 Divergence - High volatility ahead" : 
+             consciousness_active ? "💡 Market consciousness active - Major move possible" :
+             homotopy_detected ? "💡 Path equivalence detected - Arbitrage opportunity" :
+             not overall_functoriality ? "💡 Functorial breakdown - Structure unstable" :
+             "💡 Analyzing categorical structure..."
+    table.cell(theory_dash, 0, 11, advice, text_color=text_bright, text_size=label_text_size, text_halign=text.align_left)
+
+// ========================================
+// WATERMARK
+// ========================================
+if barstate.islast
+    var table watermark = table.new(position.bottom_center, 1, 1, bgcolor=color.new(bg_dark, 100))
+    table.cell(watermark, 0, 0, "Dskyz (DAFE) ∙ CMM v1.0 ∙ " + color_scheme + " Theme", text_color=color.new(text_muted, 50), text_size=size.tiny)
+
+// ========================================
+// DATA WINDOW EXPORTS
+// ========================================
+plot(composite_morphism_strength, "Morphism Strength", display=display.data_window)
+plot(functorial_integrity, "Functorial Integrity", display=display.data_window)
+plot(max_homotopy_score, "Homotopy Score", display=display.data_window)
+plot(consciousness_level, "Consciousness Level", display=display.data_window)
+plot(overall_score, "Overall Score", display=display.data_window)
+plot(initial_count, "Initial Count", display=display.data_window)
+plot(terminal_count, "Terminal Count", display=display.data_window)
+plot(product_count, "Product Count", display=display.data_window)
+plot(coproduct_count, "Coproduct Count", display=display.data_window)
+
+// ========================================
+// Watermark 
+// ========================================
+var table watermarkTable = na
+if na(watermarkTable)
+    watermarkTable := table.new(position.bottom_center, 1, 1, bgcolor=color.new(color.black, 90), border_color=color.new(color.purple, 80), border_width=1)
+table.clear(watermarkTable, 0, 0)
+table.cell(watermarkTable, 0, 0, "⚡ Dskyz (DAFE) Trading Systems", text_color=color.rgb(200, 200, 255), text_size=size.normal)

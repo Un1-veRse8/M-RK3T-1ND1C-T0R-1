@@ -1,0 +1,75 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DakonTrading
+
+//@version=6
+indicator('Dynamic Trailing [Dakon]', overlay=true)
+
+
+// # ========================================================================= #
+//                           Inputs
+// # ========================================================================= #
+int smartsens = input(5, 'Sensitivity',group ="Trailing" )
+int atrlen     = input(1, 'Period', group = "Trailing")
+color colorUp = input.color(color.new(#04f7d6, 0), 'Up Color', inline='2')
+color colorDn = input.color(color.new(#c300ff, 0), 'Down Color', inline='2')
+
+int r1         = input.int(9, minval=1, title='Line 1',group ="MA")
+int r2         = input.int(18, minval=1, title='Line 2',group ="MA")
+color colorrma = input.color(color.new(#0026ff, 0), 'Trend Color', inline='2')
+
+// === RMA Calculation ===
+rma1 = ta.rma(close, r1)
+rma2 = ta.rma(close, r2)
+
+// === Functions ===
+getSourcePrice(srcIn, isUpperBand) =>
+    ret = close
+    if srcIn == 'wicks'
+        ret := isUpperBand ? high : low
+    ret
+calcSmartTrail(float scaledATR) =>
+    upperATRBand = getSourcePrice('close', true) + scaledATR
+    lowerATRBand = getSourcePrice('close', false) - scaledATR
+    
+    var float trail = na
+    var int pos = 1
+
+ 
+    upper = ta.sma(ta.rma(upperATRBand, 33), 13)
+    lower = ta.sma(ta.rma(lowerATRBand, 33), 13)
+
+    if pos == 1
+        trail := lower
+    else if pos == -1
+        trail := upper
+
+    if pos == 1 and close < lower
+        pos := -1
+        trail := upper
+    else if pos == -1 and close > upper
+        pos := 1
+        trail := lower
+
+    trail
+
+// ATR Caculation
+atrMultiplier  = smartsens * 0.5
+scaledATR      = ta.atr(atrlen) * atrMultiplier
+smartTrail     = calcSmartTrail(scaledATR)
+
+// Scale
+atrWide        = ta.atr(atrlen * 2)
+smartTrailWide = close > smartTrail ? smartTrail + atrWide : smartTrail - atrWide
+trailColor = close > smartTrail ? colorUp : colorDn
+
+// # ========================================================================= #
+//                            Outputs
+// # ========================================================================= #
+t1    = plot(smartTrail, color=trailColor, linewidth=1, editable=false)
+t2   = plot(smartTrailWide, color=color.new(color.black, 100), linewidth=1, editable=false)
+fill(t1, t2, close > smartTrail ? color.new(colorUp, 60) : color.new(colorDn, 60))
+plot(smartTrail, color=color.new(trailColor, 45), linewidth=1, title = 'Trailing')
+plot(rma1, color=color.new(colorrma,0), linewidth=1, title='R1')
+plot(rma1, color=color.new(colorrma,70), linewidth=4, title='R1 Blur')
+plot(rma1, color=color.new(colorrma,85), linewidth=6, title='R1 Blur')
+plot(rma2, color=color.new(colorrma,25), linewidth=1, title='R2')

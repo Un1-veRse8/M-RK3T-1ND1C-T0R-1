@@ -1,0 +1,288 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/  
+// © PhenLabs 
+
+//@version=5
+indicator('CNN Statistical Trading System [PhenLabs]', shorttitle = 'STS - PhenLabs', overlay = false, max_bars_back = 500, precision = 1) // Changed precision to 1
+
+// ===== INPUTS =====
+grp_display = '🎨 Display Settings'
+grp_params = '⚙️ Core Parameters'
+grp_thresholds = '🎯 Signal Thresholds'
+grp_style = '🎭 Visual Style'
+
+showSignals = input.bool(true, 'Show Buy/Sell Markers', group = grp_display, inline = 'disp1')
+showFeatures = input.bool(false, 'Show Individual Feature Plots', group = grp_display, inline = 'disp1') // Note: Feature plots f1-f6 will remain on their original scale
+showInfoPanel = input.bool(true, 'Show Information Panel', group = grp_display, inline = 'disp2')
+showConfidenceBands = input.bool(true, 'Show Confidence Bands', group = grp_display, inline = 'disp2')
+
+smoothingPeriod = input.int(3, 'Signal Smoothing Period', minval = 1, maxval = 20, group = grp_params)
+// Updated thresholds for 1-100 scale. Original 0.65 -> 82.7, -0.65 -> 18.3
+longThreshold = input.float(82.7, 'Long Signal Threshold (1-100)', minval = 50.5, maxval = 100, step = 0.1, group = grp_thresholds)
+shortThreshold = input.float(18.3, 'Short Signal Threshold (1-100)', minval = 1, maxval = 50.5, step = 0.1, group = grp_thresholds)
+
+// Style inputs
+colorTheme = input.string('Monochrome', 'Color Theme', options = ['Professional', 'Ocean', 'Sunset', 'Monochrome'], group = grp_style)
+signalStyle = 'Subtle' // Assuming 'Subtle' from original if not an input; otherwise, this would be an input.string
+dashboardSize = input.string('Normal', 'Dashboard Size', options = ['Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = grp_style, tooltip = 'Adjusts the text size of the information panel')
+
+// ===== DASHBOARD SIZE MAPPING =====
+// Map dashboard size input to Pine Script text sizes
+main_text_size = dashboardSize == 'Tiny' ? size.tiny : dashboardSize == 'Small' ? size.small : dashboardSize == 'Normal' ? size.normal : dashboardSize == 'Large' ? size.large : size.huge
+secondary_text_size = dashboardSize == 'Tiny' ? size.tiny : dashboardSize == 'Small' ? size.tiny : dashboardSize == 'Normal' ? size.small : dashboardSize == 'Large' ? size.normal : size.large
+
+// ===== DYNAMIC COLOR PALETTE =====
+// Professional Theme (default)
+prof_long = color.rgb(13, 110, 85) // Deep teal
+prof_short = color.rgb(156, 39, 39) // Deep red
+prof_neutral = color.rgb(99, 110, 123) // Blue-gray
+prof_accent = color.rgb(7, 32, 255) // Blue accent
+
+// Ocean Theme
+ocean_long = color.rgb(0, 123, 191) // Ocean blue
+ocean_short = color.rgb(220, 53, 69) // Coral red
+ocean_neutral = color.rgb(108, 117, 125) // Gray
+ocean_accent = color.rgb(32, 201, 151) // Turquoise
+
+// Sunset Theme
+sunset_long = color.rgb(255, 138, 0) // Orange
+sunset_short = color.rgb(156, 39, 176) // Purple
+sunset_neutral = color.rgb(121, 85, 72) // Brown
+sunset_accent = color.rgb(255, 235, 59) // Yellow
+
+// Monochrome Theme
+mono_long = color.rgb(184, 184, 184) // Dark gray
+mono_short = color.rgb(117, 117, 117) // 
+mono_neutral = color.rgb(158, 158, 158) // Light gray
+mono_accent = color.rgb(255, 255, 255) // White
+
+// Apply selected theme
+color_long = colorTheme == 'Ocean' ? ocean_long : colorTheme == 'Sunset' ? sunset_long : colorTheme == 'Monochrome' ? mono_long : prof_long
+color_short = colorTheme == 'Ocean' ? ocean_short : colorTheme == 'Sunset' ? sunset_short : colorTheme == 'Monochrome' ? mono_short : prof_short
+color_neutral_theme = colorTheme == 'Ocean' ? ocean_neutral : colorTheme == 'Sunset' ? sunset_neutral : colorTheme == 'Monochrome' ? mono_neutral : prof_neutral // Renamed to avoid conflict
+color_accent = colorTheme == 'Ocean' ? ocean_accent : colorTheme == 'Sunset' ? sunset_accent : colorTheme == 'Monochrome' ? mono_accent : prof_accent
+
+// Derived colors with consistent transparency
+color_text_light = color.white
+color_text_dark = color.black
+color_panel_bg = color.new(color_neutral_theme, 85)
+color_border = color.new(color_neutral_theme, 60)
+
+// Signal colors that match the theme
+color_buy_signal = color.new(color_long, 0)
+color_sell_signal = color.new(color_short, 0)
+// color_buy_bg = color.new(color_long, 80) // Not explicitly used later, can be removed if not needed
+// color_sell_bg = color.new(color_short, 80) // Not explicitly used later
+
+// Feature colors with theme-aware transparency
+color_feature_1 = color.new(color_long, 40)
+color_feature_2 = color.new(color_short, 40)
+color_feature_3 = color.new(color_accent, 40)
+color_feature_4 = color.new(color_long, 60)
+color_feature_5 = color.new(color_neutral_theme, 30)
+color_feature_6 = color.new(color_accent, 60)
+
+// ===== KERNEL DEFINITIONS =====
+kernel_size = 5
+var kernel1 = array.from(-1.414, -0.707, 0.0, 0.707, 1.414) // Upward momentum
+var kernel2 = array.from(1.414, 0.707, 0.0, -0.707, -1.414) // Downward momentum
+var kernel3 = array.from(-1.069, 0.267, 1.603, 0.267, -1.069) // Peak/Resistance
+var kernel4 = array.from(1.069, -0.267, -1.603, -0.267, 1.069) // Trough/Support
+var kernel5 = array.from(-0.632, -0.316, 1.897, -0.316, -0.632) // Consolidation
+var kernel6 = array.from(-1.336, -0.802, -0.267, 0.802, 1.603) // Breakout
+
+// ===== CONVOLUTION FUNCTION =====
+convolve(prices, kernel) =>
+    float result = 0.0
+    for i = 0 to kernel_size - 1 by 1
+        result += array.get(prices, i) * array.get(kernel, i) // Corrected assignment
+    result / kernel_size
+
+// ===== ACTIVATION FUNCTION =====
+activate(x) =>
+    x > 2 ? 1.0 : x < -2 ? -1.0 : x * 0.5
+
+// ===== MAIN CALCULATION =====
+float f1 = na
+float f2 = na
+float f3 = na
+float f4 = na
+float f5 = na
+float f6 = na
+float composite = na
+float smoothed_composite_unscaled = na // Original smoothed composite (-1 to 1)
+float scaled_score = na             // Scaled score (1 to 100)
+
+if bar_index >= kernel_size - 1
+    mean = ta.sma(close, kernel_size)
+    stdev = ta.stdev(close, kernel_size)
+    var norm_prices = array.new_float(kernel_size, 0)
+
+    if stdev > 0.000001
+        for i = 0 to kernel_size - 1 by 1
+            normalized_price = (close[i] - mean) / stdev
+            array.set(norm_prices, i, normalized_price)
+
+        f1 := convolve(norm_prices, kernel1)
+        f2 := convolve(norm_prices, kernel2)
+        f3 := convolve(norm_prices, kernel3)
+        f4 := convolve(norm_prices, kernel4)
+        f5 := convolve(norm_prices, kernel5)
+        f6 := convolve(norm_prices, kernel6)
+
+        momentum_signal = f1 * 1.2 - f2 * 1.2 + f4 * 0.8
+        reversal_signal = f4 * 1.0 - f3 * 1.0
+        breakout_signal = f6 * 1.5 + f5 * 0.5
+
+        momentum_activated = activate(momentum_signal)
+        reversal_activated = activate(reversal_signal)
+        breakout_activated = activate(breakout_signal)
+
+        volatility = ta.atr(14) / close
+        trend_strength = math.abs(ta.ema(close, 10) - ta.ema(close, 30)) / close
+
+        w_momentum = volatility < 0.02 ? 0.5 : 0.3
+        w_reversal = trend_strength < 0.01 ? 0.3 : 0.2
+        w_breakout = math.max(0.0, 1.0 - w_momentum - w_reversal)
+
+        composite := w_momentum * momentum_activated + w_reversal * reversal_activated + w_breakout * breakout_activated
+    else
+        composite := 0.0
+        f1 := 0.0
+        f2 := 0.0
+        f3 := 0.0
+        f4 := 0.0
+        f5 := 0.0
+        f6 := 0.0
+
+smoothed_composite_unscaled := ta.ema(na(composite) ? 0.0 : composite, smoothingPeriod)
+
+// ===== SCALING TO 1-100 =====
+// Original range is approximately -1 to 1. New range is 1 to 100.
+// Neutral point (0 in original) becomes 50.5 in new scale.
+scale_to_100(val) => (val + 1.0) * 49.5 + 1.0
+neutral_point_scaled = 50.5
+
+scaled_score := scale_to_100(smoothed_composite_unscaled)
+scaled_score := math.max(1.0, math.min(100.0, scaled_score)) // Clamp to 1-100 range
+
+// ===== SIGNAL GENERATION =====
+rsi_val = ta.rsi(close, 14)
+volume_confirm = volume > ta.sma(volume, 20) * 1.2
+
+longCondition = ta.crossover(scaled_score, longThreshold) and rsi_val < 75 and volume_confirm
+shortCondition = ta.crossunder(scaled_score, shortThreshold) and rsi_val > 25 and volume_confirm
+
+continuousLong = scaled_score > longThreshold
+continuousShort = scaled_score < shortThreshold
+
+// Signal strength based on the original unscaled composite's magnitude (0 to 1)
+signal_strength_original_scale = math.abs(smoothed_composite_unscaled)
+strong_signal = signal_strength_original_scale > 0.6 // Threshold based on original scale magnitude
+
+// ===== VISUALIZATION =====
+// Main score line with gradient effect
+score_color = smoothed_composite_unscaled > 0 ? color.new(color_long, 0) : color.new(color_short, 0)
+plot_score = plot(scaled_score, 'CNN Score (1-100)', color = score_color, linewidth = 2)
+
+// Neutral reference line (equivalent to old Zero line)
+plot_neutral_ref = plot(neutral_point_scaled, 'Neutral Reference (50.5)', color = color.new(color_neutral_theme, 30), linewidth = 1, style = plot.style_line)
+
+// Gradient fill between score and neutral reference
+fill_color = smoothed_composite_unscaled > 0 ? color.new(color_long, 90) : color.new(color_short, 90)
+fill(plot_score, plot_neutral_ref, color = fill_color, title = 'Score Gradient')
+
+// Confidence bands (adjusted for 1-100 scale)
+upper_band = showConfidenceBands ? math.min(100.0, longThreshold + (longThreshold - neutral_point_scaled) * 0.5) : na
+lower_band = showConfidenceBands ? math.max(1.0, shortThreshold - (neutral_point_scaled - shortThreshold) * 0.5) : na
+
+plot_upper = plot(upper_band, 'Upper Confidence', color = color.new(color_long, 70), style = plot.style_stepline)
+plot_lower = plot(lower_band, 'Lower Confidence', color = color.new(color_short, 70), style = plot.style_stepline)
+
+// Confidence band fills
+plot_long_thresh_line = plot(showConfidenceBands ? longThreshold : na, color = na, display = display.none) // Invisible plot for fill base
+plot_short_thresh_line = plot(showConfidenceBands ? shortThreshold : na, color = na, display = display.none) // Invisible plot for fill base
+fill(plot_upper, plot_long_thresh_line, color = color.new(color_long, 95), title = 'Long Confidence Zone', display = showConfidenceBands ? display.all : display.none)
+fill(plot_short_thresh_line, plot_lower, color = color.new(color_short, 95), title = 'Short Confidence Zone', display = showConfidenceBands ? display.all : display.none)
+
+// Threshold lines with enhanced styling
+plot(longThreshold, 'Long Threshold', color = color.new(color_long, 40), style = plot.style_line, linewidth = 1)
+plot(shortThreshold, 'Short Threshold', color = color.new(color_short, 40), style = plot.style_line, linewidth = 1)
+
+// Individual feature plots (when enabled) - these remain on their original convolved scale
+plot(f1, 'Upward Momentum', color = showFeatures ? color_feature_1 : na, linewidth = 1, style = plot.style_stepline)
+plot(f2, 'Downward Momentum', color = showFeatures ? color_feature_2 : na, linewidth = 1, style = plot.style_stepline)
+plot(f3, 'Peak Pattern', color = showFeatures ? color_feature_3 : na, linewidth = 1, style = plot.style_circles)
+plot(f4, 'Trough Pattern', color = showFeatures ? color_feature_4 : na, linewidth = 1, style = plot.style_circles)
+plot(f5, 'Consolidation', color = showFeatures ? color_feature_5 : na, linewidth = 1, style = plot.style_cross)
+plot(f6, 'Breakout', color = showFeatures ? color_feature_6 : na, linewidth = 1, style = plot.style_area)
+
+
+// Sophisticated background coloring (using original scale signal strength)
+bg_intensity = math.min(math.round(signal_strength_original_scale * 200), 95) // math.round to ensure integer for transparency
+bgcolor(continuousLong ? color.new(color_long, bg_intensity) : continuousShort ? color.new(color_short, bg_intensity) : na, display = showSignals ? display.all : display.none) // Added display condition based on showSignals as it's a signal visual
+
+// ===== ENHANCED SIGNAL MARKERS =====
+// Adaptive signal styling based on user preference
+signal_size_val = signalStyle == 'Bold' ? size.large : signalStyle == 'Minimal' ? size.tiny : size.small // Renamed to avoid conflict
+
+// Subtle circular markers
+plotchar(showSignals and longCondition, 'Buy', '●', location.bottom, color_buy_signal, size = signal_size_val)
+plotchar(showSignals and shortCondition, 'Sell', '●', location.top, color_sell_signal, size = signal_size_val)
+
+// ===== ALERTS =====
+// Use plot placeholder for dynamic values in alert messages
+alertcondition(longCondition, title='CNN STS Long', message='🔵 CNN STS Long Signal: {{ticker}} @ {{close}}; Score: {{plot("CNN Score (1-100)")}}')
+alertcondition(shortCondition, title='CNN STS Short', message='🔴 CNN STS Short Signal: {{ticker}} @ {{close}}; Score: {{plot("CNN Score (1-100)")}}')
+
+// ===== ENHANCED INFORMATION PANEL =====
+if showInfoPanel
+    var table infoPanel = table.new(position.top_right, 2, 6, bgcolor = color_panel_bg, border_width = 1, border_color = color_border, frame_width = 2, frame_color = color.new(color_accent, 50))
+
+    if barstate.islast
+        // Calculate display values
+        _current_f1 = na(f1) ? 0.0 : f1
+        _current_f2 = na(f2) ? 0.0 : f2
+        _current_f3 = na(f3) ? 0.0 : f3
+        _current_f4 = na(f4) ? 0.0 : f4
+        _current_f5 = na(f5) ? 0.0 : f5
+        _current_f6 = na(f6) ? 0.0 : f6
+
+        // Dynamic colors based on values
+        // For score color, compare scaled_score against neutral_point_scaled with a small dead zone
+        // Original dead zone was 0.1 on a +/-1 scale, which is 10% of half-range.
+        // 10% of (100 - 50.5) = 4.95.
+        _near_neutral_threshold = 4.95 
+        _score_color_panel = math.abs(scaled_score - neutral_point_scaled) < _near_neutral_threshold ? color_neutral_theme : scaled_score > neutral_point_scaled ? color_long : color_short
+        
+        _state_text = continuousLong ? '🟢 BULLISH' : continuousShort ? '🔴 BEARISH' : '⚪ NEUTRAL'
+        _state_color_panel = continuousLong ? color_long : continuousShort ? color_short : color_neutral_theme // Panel specific state color
+        
+        _momentum_val = _current_f1 - _current_f2 // This remains in its original scale
+        _momentum_color_panel = math.abs(_momentum_val) < 0.1 ? color_neutral_theme : _momentum_val > 0 ? color_long : color_short // Panel specific
+        
+        _strength_val_features = math.max(math.abs(_current_f3), math.abs(_current_f4), math.abs(_current_f5), math.abs(_current_f6)) // Original scale
+        _strength_color_panel = _strength_val_features > 0.75 ? color_accent : _strength_val_features > 0.4 ? color.new(color_accent, 40) : color_neutral_theme // Panel specific
+
+        _confidence = signal_strength_original_scale * 100 // Confidence 0-100% based on original signal magnitude
+        _conf_color_panel = _confidence > 70 ? color_accent : _confidence > 40 ? color.new(color_accent, 30) : color_neutral_theme // Panel specific
+
+        // Panel header
+        table.cell(infoPanel, 0, 0, '𓄀 CNN SYSTEM', text_halign = text.align_center, text_color = color_accent, text_size = main_text_size, bgcolor = color.new(color_neutral_theme, 95))
+        table.cell(infoPanel, 1, 0, colorTheme + ' Theme', text_halign = text.align_center, text_color = color_text_light, text_size = secondary_text_size, bgcolor = color.new(color_neutral_theme, 95))
+
+        // Data rows
+        table.cell(infoPanel, 0, 1, 'Score:', text_halign = text.align_left, text_color = color_text_light, text_size = main_text_size)
+        table.cell(infoPanel, 1, 1, str.tostring(scaled_score, '0.1'), text_halign = text.align_right, text_color = _score_color_panel, text_size = main_text_size, text_font_family = font.family_monospace)
+
+        table.cell(infoPanel, 0, 2, 'State:', text_halign = text.align_left, text_color = color_text_light, text_size = main_text_size)
+        table.cell(infoPanel, 1, 2, _state_text, text_halign = text.align_right, text_color = _state_color_panel, text_size = main_text_size)
+
+        table.cell(infoPanel, 0, 3, 'Momentum:', text_halign = text.align_left, text_color = color_text_light, text_size = main_text_size)
+        table.cell(infoPanel, 1, 3, str.tostring(_momentum_val, '0.00'), text_halign = text.align_right, text_color = _momentum_color_panel, text_size = main_text_size, text_font_family = font.family_monospace)
+
+        table.cell(infoPanel, 0, 4, 'Confidence:', text_halign = text.align_left, text_color = color_text_light, text_size = main_text_size)
+        table.cell(infoPanel, 1, 4, str.tostring(_confidence, '0') + '%', text_halign = text.align_right, text_color = _conf_color_panel, text_size = main_text_size, text_font_family = font.family_monospace)
+
+        table.cell(infoPanel, 0, 5, 'RSI:', text_halign = text.align_left, text_color = color_text_light, text_size = main_text_size)
+        table.cell(infoPanel, 1, 5, str.tostring(rsi_val, '0.0'), text_halign = text.align_right, text_color = rsi_val > 70 or rsi_val < 30 ? color_accent : color_text_light, text_size = main_text_size, text_font_family = font.family_monospace)
+        
