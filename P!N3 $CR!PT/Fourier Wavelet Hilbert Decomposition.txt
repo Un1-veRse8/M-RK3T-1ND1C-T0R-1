@@ -1,0 +1,118 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Dshergill
+
+//@version=6
+indicator('Fourier Wavelet Hilbert Decomposition', shorttitle = 'FWHD', overlay = false, max_lines_count = 500)
+
+// Input for selecting analysis
+selected_analysis = input.string('Fourier', title = 'Select Analysis', options = ['Fourier', 'Wavelet', 'Hilbert', 'Decomposition'])
+
+// Fourier Inputs
+N = input.int(10, title = 'Fourier - Total Fourier Terms (N)', minval = 1, maxval = 50)
+frame = input.int(5, title = 'Fourier - Animated Terms (Up to N)', minval = 1, maxval = 50)
+show_individual = input.bool(true, title = 'Fourier - Show Individual Sine Terms')
+show_square_wave = input.bool(true, title = 'Fourier - Show Ideal Square Wave')
+period_bars = input.int(40, title = 'Fourier - Period in Bars', minval = 1)
+
+// Wavelet Inputs
+wavelet_length = input.int(10, title = 'Wavelet - Length')
+wavelet_src = input.source(close, title = 'Wavelet - Source')
+
+// Hilbert Inputs
+hilbert_length = input.int(10, title = 'Hilbert - Length')
+hilbert_src = input.source(close, title = 'Hilbert - Source')
+
+// Decomposition Inputs
+decomposition_trend_length = input.int(20, title = 'Decomposition - Trend Length')
+decomposition_seasonal_length = input.int(10, title = 'Decomposition - Seasonal Length')
+decomposition_src = input.source(close, title = 'Decomposition - Source')
+
+// Fourier Calculation
+var float pi = math.pi
+t = bar_index * 2 * pi / period_bars
+var float fourier_sum = 0.0
+fourier_sum := 0.0
+sine_terms = array.new_float(0)
+var sine_plots = array.new_float(10, na) // Array to store up to 10 sine terms for plotting
+for k = 0 to N - 1 by 1
+    n = 2 * k + 1
+    term = math.sin(n * t) / n
+    if k < frame
+        fourier_sum := fourier_sum + term
+        fourier_sum
+    array.push(sine_terms, term)
+    // Store scaled term for plotting (up to 10 terms)
+    if k < 10
+        array.set(sine_plots, k, 4 / pi * term)
+square_approx = 4 / pi * fourier_sum
+square_ref = t % (2 * pi) < pi ? 1 : -1
+
+// Wavelet Calculation
+wavelet = ta.sma(wavelet_src, wavelet_length) - ta.sma(wavelet_src, wavelet_length * 2)
+
+// Hilbert Calculation
+detrender = ta.sma(hilbert_src, hilbert_length)
+I1 = ta.sma(detrender, hilbert_length / 2)
+Q1 = ta.sma(I1, hilbert_length / 2)
+I2 = ta.sma(Q1, hilbert_length / 2)
+Q2 = ta.sma(I2, hilbert_length / 2)
+hilbert = math.atan(Q2 / I2) * 180 / math.pi
+
+// Decomposition Calculation
+original = decomposition_src
+trend = ta.sma(original, decomposition_trend_length)
+residual = original - trend
+seasonal = ta.sma(residual, decomposition_seasonal_length)
+final_residual = residual - seasonal
+
+// Plots in Global Scope
+plot_fourier = selected_analysis == 'Fourier' ? square_approx : na
+plot_wavelet = selected_analysis == 'Wavelet' ? wavelet : na
+plot_hilbert = selected_analysis == 'Hilbert' ? hilbert : na
+plot_original = selected_analysis == 'Decomposition' ? original : na
+plot_trend = selected_analysis == 'Decomposition' ? trend : na
+plot_seasonal = selected_analysis == 'Decomposition' ? seasonal : na
+plot_residual = selected_analysis == 'Decomposition' ? final_residual : na
+plot_square_ref = selected_analysis == 'Fourier' and show_square_wave ? square_ref : na
+
+// Plot Fourier
+plot(plot_fourier, title = 'Fourier Approximation', color = color.orange, linewidth = 2)
+
+// Plot individual sine terms (up to 10) in global scope
+plot_sine_0 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 0) : na
+plot_sine_1 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 1) : na
+plot_sine_2 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 2) : na
+plot_sine_3 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 3) : na
+plot_sine_4 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 4) : na
+plot_sine_5 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 5) : na
+plot_sine_6 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 6) : na
+plot_sine_7 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 7) : na
+plot_sine_8 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 8) : na
+plot_sine_9 = show_individual and selected_analysis == 'Fourier' ? array.get(sine_plots, 9) : na
+
+plot(plot_sine_0, title = 'Sine Term 1', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_1, title = 'Sine Term 2', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_2, title = 'Sine Term 3', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_3, title = 'Sine Term 4', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_4, title = 'Sine Term 5', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_5, title = 'Sine Term 6', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_6, title = 'Sine Term 7', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_7, title = 'Sine Term 8', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_8, title = 'Sine Term 9', color = color.new(color.blue, 80), linewidth = 1)
+plot(plot_sine_9, title = 'Sine Term 10', color = color.new(color.blue, 80), linewidth = 1)
+
+plot(plot_square_ref, title = 'Ideal Square Wave', color = color.green, style = plot.style_stepline, linewidth = 1)
+hline(selected_analysis == 'Fourier' ? 1 : na, title = 'High', color = color.gray, linestyle = hline.style_dotted)
+hline(selected_analysis == 'Fourier' ? -1 : na, title = 'Low', color = color.gray, linestyle = hline.style_dotted)
+
+// Plot Wavelet
+plot(plot_wavelet, title = 'Wavelet Approximation', color = color.blue)
+
+// Plot Hilbert
+plot(plot_hilbert, title = 'Hilbert Transform', color = color.blue)
+
+// Plot Decomposition
+plot(plot_original, title = 'Original', color = color.black)
+plot(plot_trend, title = 'Trend', color = color.blue)
+plot(plot_seasonal, title = 'Seasonal', color = color.green)
+plot(plot_residual, title = 'Residual', color = color.red)

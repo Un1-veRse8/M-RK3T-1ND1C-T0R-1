@@ -1,0 +1,453 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © tradedots
+
+//@version=6
+indicator("ETF Builder & Backtest System [TradeDots]", overlay=true, max_lines_count=50, max_labels_count=500, max_boxes_count=500, max_bars_back=5000)
+
+// --- User Inputs ---
+// Time Filter
+var gp_time           = "Time Filter"
+startDateInput       = input.time(timestamp("2019-12-31T00:00:00"), "Start Date",  group=gp_time)
+endDateInput         = input.time(timestamp("2025-01-01T00:00:00"),   "End Date",  group=gp_time)
+useTimeFilter        = input.bool(true, "Enable Time Filter",         group=gp_time)
+
+// Assets & Weights (Up to 10)
+var gp_assets = "Assets & Weights"
+// --- Asset 1 ---
+asset1_sym = input.symbol("AAPL", "Asset 1", group=gp_assets, inline="a1")
+asset1_wgt = input.float(15.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a1") / 100.0
+// --- Asset 2 ---
+asset2_sym = input.symbol("MSFT", "Asset 2", group=gp_assets, inline="a2")
+asset2_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a2") / 100.0
+// --- Asset 3 ---
+asset3_sym = input.symbol("GOOGL", "Asset 3", group=gp_assets, inline="a3")
+asset3_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a3") / 100.0
+// --- Asset 4 ---
+asset4_sym = input.symbol("AMZN", "Asset 4", group=gp_assets, inline="a4")
+asset4_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a4") / 100.0
+// --- Asset 5 ---
+asset5_sym = input.symbol("NVDA", "Asset 5", group=gp_assets, inline="a5")
+asset5_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a5") / 100.0
+// --- Asset 6 ---
+asset6_sym = input.symbol("TSLA", "Asset 6", group=gp_assets, inline="a6")
+asset6_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a6") / 100.0
+// --- Asset 7 ---
+asset7_sym = input.symbol("META", "Asset 7", group=gp_assets, inline="a7")
+asset7_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a7") / 100.0
+// --- Asset 8 ---
+asset8_sym = input.symbol("JPM", "Asset 8", group=gp_assets, inline="a8")
+asset8_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a8") / 100.0
+// --- Asset 9 ---
+asset9_sym = input.symbol("V", "Asset 9", group=gp_assets, inline="a9")
+asset9_wgt = input.float(10.0,  "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a9") / 100.0
+// --- Asset 10 ---
+asset10_sym = input.symbol("ETHUSDT", "Asset 10", group=gp_assets, inline="a10")
+asset10_wgt = input.float(5.0,   "Wt%", minval=0, maxval=100, step=0.1, group=gp_assets, inline="a10") / 100.0
+
+// Table & Plot Configuration
+var gp_display       = "Display Options"
+table_pos           = input.string("top_right", "Table Position", options=["top_left", "top_right", "middle_left", "middle_right", "bottom_left", "bottom_right"], group=gp_display)
+table_bg_color      = input.color(#444651, "Table BG Color", group=gp_display)
+table_text_color    = input.color(color.white, "Table Text Color", group=gp_display)
+showEtfPlot         = input.bool(true, "Show ETF Price Curve", group=gp_display) // Toggle plot
+
+// --- Variable Declarations ---
+// Prices
+var float price1      = na
+var float price2      = na
+var float price3      = na
+var float price4      = na
+var float price5      = na
+var float price6      = na
+var float price7      = na
+var float price8      = na
+var float price9      = na
+var float price10     = na
+
+// Start Prices & Times (capture once)
+var float startPrice1  = na, var int startPriceTime1  = na
+var float startPrice2  = na, var int startPriceTime2  = na
+var float startPrice3  = na, var int startPriceTime3  = na
+var float startPrice4  = na, var int startPriceTime4  = na
+var float startPrice5  = na, var int startPriceTime5  = na
+var float startPrice6  = na, var int startPriceTime6  = na
+var float startPrice7  = na, var int startPriceTime7  = na
+var float startPrice8  = na, var int startPriceTime8  = na
+var float startPrice9  = na, var int startPriceTime9  = na
+var float startPrice10 = na, var int startPriceTime10 = na
+
+// End Prices (updated within range)
+var float endPrice1  = na
+var float endPrice2  = na
+var float endPrice3  = na
+var float endPrice4  = na
+var float endPrice5  = na
+var float endPrice6  = na
+var float endPrice7  = na
+var float endPrice8  = na
+var float endPrice9  = na
+var float endPrice10 = na
+
+// ETF Values
+var float etfStartValue       = na
+var float etfCurrentValue     = na
+
+// Calculation State
+var bool calculationReady     = false
+var bool etfStartValueCalculated = false
+var int actualStartTime       = na
+var int actualEndTime         = na
+
+// --- Data Retrieval ---
+price1  := request.security(asset1_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price2  := request.security(asset2_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price3  := request.security(asset3_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price4  := request.security(asset4_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price5  := request.security(asset5_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price6  := request.security(asset6_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price7  := request.security(asset7_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price8  := request.security(asset8_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price9  := request.security(asset9_sym , timeframe.period, close, ignore_invalid_symbol=true)
+price10 := request.security(asset10_sym, timeframe.period, close, ignore_invalid_symbol=true)
+
+// --- Time Filter Logic ---
+// true if not using time filter, OR if (start <= time <= end)
+timeInRange = not useTimeFilter or (time >= startDateInput and time <= endDateInput)
+
+// --- Calculation Logic ---
+// 1. Capture individual start prices & times (only once per asset when data first appears)
+if na(startPrice1)  and not na(price1) and timeInRange
+    startPrice1      := price1
+    startPriceTime1  := time
+if na(startPrice2)  and not na(price2) and timeInRange
+    startPrice2      := price2
+    startPriceTime2  := time
+if na(startPrice3)  and not na(price3) and timeInRange
+    startPrice3      := price3
+    startPriceTime3  := time 
+if na(startPrice4)  and not na(price4) and timeInRange
+    startPrice4      := price4
+    startPriceTime4  := time
+if na(startPrice5)  and not na(price5) and timeInRange
+    startPrice5      := price5
+    startPriceTime5  := time
+if na(startPrice6)  and not na(price6) and timeInRange
+    startPrice6      := price6
+    startPriceTime6  := time
+if na(startPrice7)  and not na(price7) and timeInRange
+    startPrice7      := price7
+    startPriceTime7  := time
+if na(startPrice8)  and not na(price8) and timeInRange
+    startPrice8      := price8
+    startPriceTime8  := time
+if na(startPrice9)  and not na(price9) and timeInRange
+    startPrice9      := price9
+    startPriceTime9  := time
+if na(startPrice10) and not na(price10) and timeInRange
+    startPrice10     := price10
+    startPriceTime10 := time
+
+// 2. Check if all required assets (weight>0) are ready
+if not calculationReady and timeInRange
+    isReady = true
+    if asset1_wgt  > 0 and na(startPrice1)
+        isReady := false
+    if asset2_wgt  > 0 and na(startPrice2)
+        isReady := false
+    if asset3_wgt  > 0 and na(startPrice3)
+        isReady := false
+    if asset4_wgt  > 0 and na(startPrice4)
+        isReady := false
+    if asset5_wgt  > 0 and na(startPrice5)
+        isReady := false
+    if asset6_wgt  > 0 and na(startPrice6)
+        isReady := false
+    if asset7_wgt  > 0 and na(startPrice7)
+        isReady := false
+    if asset8_wgt  > 0 and na(startPrice8)
+        isReady := false
+    if asset9_wgt  > 0 and na(startPrice9)
+        isReady := false
+    if asset10_wgt > 0 and na(startPrice10)
+        isReady := false
+
+    if isReady
+        calculationReady := true
+
+// 3. Determine Actual Start Time and Calculate Initial ETF Value (only once, when calculation becomes ready)
+if calculationReady and not etfStartValueCalculated and timeInRange
+    // Determine the latest start time among all weighted assets
+    actualStartTime := time
+    startPrice1      := price1
+    startPriceTime1  := time
+    startPrice2      := price2
+    startPriceTime2  := time
+    startPrice3      := price3
+    startPriceTime3  := time 
+    startPrice4      := price4
+    startPriceTime4  := time
+    startPrice5      := price5
+    startPriceTime5  := time
+    startPrice6      := price6
+    startPriceTime6  := time
+    startPrice7      := price7
+    startPriceTime7  := time
+    startPrice8      := price8
+    startPriceTime8  := time
+    startPrice9      := price9
+    startPriceTime9  := time
+    startPrice10     := price10
+    startPriceTime10 := time
+
+    // Calculate the initial ETF value
+    tempEtfStartValue = 0.0
+    if not na(startPrice1)
+        tempEtfStartValue += startPrice1 * asset1_wgt
+    if not na(startPrice2)
+        tempEtfStartValue += startPrice2 * asset2_wgt
+    if not na(startPrice3)
+        tempEtfStartValue += startPrice3 * asset3_wgt
+    if not na(startPrice4)
+        tempEtfStartValue += startPrice4 * asset4_wgt
+    if not na(startPrice5)
+        tempEtfStartValue += startPrice5 * asset5_wgt
+    if not na(startPrice6)
+        tempEtfStartValue += startPrice6 * asset6_wgt
+    if not na(startPrice7)
+        tempEtfStartValue += startPrice7 * asset7_wgt
+    if not na(startPrice8)
+        tempEtfStartValue += startPrice8 * asset8_wgt
+    if not na(startPrice9)
+        tempEtfStartValue += startPrice9 * asset9_wgt
+    if not na(startPrice10)
+        tempEtfStartValue += startPrice10 * asset10_wgt
+
+    etfStartValue           := tempEtfStartValue
+    etfStartValueCalculated := true
+
+// 4. Update End Prices & ETF Current Value — only if calculation ready AND bar is within range AND bar time >= actualStartTime
+if calculationReady and timeInRange and time >= actualStartTime
+    // keep track of the last in-range bar
+    actualEndTime := time
+
+    // Capture End prices
+    endPrice1  := price1
+    endPrice2  := price2
+    endPrice3  := price3
+    endPrice4  := price4
+    endPrice5  := price5
+    endPrice6  := price6
+    endPrice7  := price7
+    endPrice8  := price8
+    endPrice9  := price9
+    endPrice10 := price10
+
+    // Current ETF value
+    tempEtfCurrentValue = 0.0
+
+    // Each block uses current price if available, else last endPrice
+    if not na(price1)
+        tempEtfCurrentValue += price1 * asset1_wgt
+    else if not na(endPrice1)
+        tempEtfCurrentValue += endPrice1 * asset1_wgt
+
+    if not na(price2)
+        tempEtfCurrentValue += price2 * asset2_wgt
+    else if not na(endPrice2)
+        tempEtfCurrentValue += endPrice2 * asset2_wgt
+
+    if not na(price3)
+        tempEtfCurrentValue += price3 * asset3_wgt
+    else if not na(endPrice3)
+        tempEtfCurrentValue += endPrice3 * asset3_wgt
+
+    if not na(price4)
+        tempEtfCurrentValue += price4 * asset4_wgt
+    else if not na(endPrice4)
+        tempEtfCurrentValue += endPrice4 * asset4_wgt
+
+    if not na(price5)
+        tempEtfCurrentValue += price5 * asset5_wgt
+    else if not na(endPrice5)
+        tempEtfCurrentValue += endPrice5 * asset5_wgt
+
+    if not na(price6)
+        tempEtfCurrentValue += price6 * asset6_wgt
+    else if not na(endPrice6)
+        tempEtfCurrentValue += endPrice6 * asset6_wgt
+
+    if not na(price7)
+        tempEtfCurrentValue += price7 * asset7_wgt
+    else if not na(endPrice7)
+        tempEtfCurrentValue += endPrice7 * asset7_wgt
+
+    if not na(price8)
+        tempEtfCurrentValue += price8 * asset8_wgt
+    else if not na(endPrice8)
+        tempEtfCurrentValue += endPrice8 * asset8_wgt
+
+    if not na(price9)
+        tempEtfCurrentValue += price9 * asset9_wgt
+    else if not na(endPrice9)
+        tempEtfCurrentValue += endPrice9 * asset9_wgt
+
+    if not na(price10)
+        tempEtfCurrentValue += price10 * asset10_wgt
+    else if not na(endPrice10)
+        tempEtfCurrentValue += endPrice10 * asset10_wgt
+
+    etfCurrentValue := tempEtfCurrentValue
+
+// --- Return Calculation Functions ---
+// Calculate Buy & Hold return (%)
+calc_bh_return(startP, endP) =>
+    // Return na if start/end is na or start is zero/negative
+    na(startP) or na(endP) or startP <= 0 ? na : (endP / startP - 1) * 100
+
+// Calculate Annualized Return (CAGR) (%)
+calc_annualized_return(startVal, endVal, startMillis, endMillis) =>
+    if na(startVal) or na(endVal) or startVal <= 0 or na(startMillis) or na(endMillis) or endMillis <= startMillis
+        na
+    else
+        durationMillis = endMillis - startMillis
+        days = durationMillis / (1000.0 * 60 * 60 * 24)
+        years = days / 365.25
+        if years <= 0 or na(years)
+            na
+        else
+            ratio = endVal / startVal
+            if ratio <= 0
+                na
+            else
+                (math.pow(ratio, 1.0 / years) - 1) * 100
+
+// --- Perform Final Calculations on Last Bar ---
+var float bhReturn1   = na, var float annReturn1   = na
+var float bhReturn2   = na, var float annReturn2   = na
+var float bhReturn3   = na, var float annReturn3   = na
+var float bhReturn4   = na, var float annReturn4   = na
+var float bhReturn5   = na, var float annReturn5   = na
+var float bhReturn6   = na, var float annReturn6   = na
+var float bhReturn7   = na, var float annReturn7   = na
+var float bhReturn8   = na, var float annReturn8   = na
+var float bhReturn9   = na, var float annReturn9   = na
+var float bhReturn10  = na, var float annReturn10  = na
+var float etfBhReturn = na, var float etfAnnReturn = na
+
+if barstate.islast and calculationReady
+    // Calculate B&H Returns
+    bhReturn1  := calc_bh_return(startPrice1,  endPrice1)
+    bhReturn2  := calc_bh_return(startPrice2,  endPrice2)
+    bhReturn3  := calc_bh_return(startPrice3,  endPrice3)
+    bhReturn4  := calc_bh_return(startPrice4,  endPrice4)
+    bhReturn5  := calc_bh_return(startPrice5,  endPrice5)
+    bhReturn6  := calc_bh_return(startPrice6,  endPrice6)
+    bhReturn7  := calc_bh_return(startPrice7,  endPrice7)
+    bhReturn8  := calc_bh_return(startPrice8,  endPrice8)
+    bhReturn9  := calc_bh_return(startPrice9,  endPrice9)
+    bhReturn10 := calc_bh_return(startPrice10, endPrice10)
+    etfBhReturn := calc_bh_return(etfStartValue, etfCurrentValue)
+
+    // Calculate Annualized Returns
+    annReturn1  := calc_annualized_return(startPrice1,  endPrice1,  actualStartTime, actualEndTime)
+    annReturn2  := calc_annualized_return(startPrice2,  endPrice2,  actualStartTime, actualEndTime)
+    annReturn3  := calc_annualized_return(startPrice3,  endPrice3,  actualStartTime, actualEndTime)
+    annReturn4  := calc_annualized_return(startPrice4,  endPrice4,  actualStartTime, actualEndTime)
+    annReturn5  := calc_annualized_return(startPrice5,  endPrice5,  actualStartTime, actualEndTime)
+    annReturn6  := calc_annualized_return(startPrice6,  endPrice6,  actualStartTime, actualEndTime)
+    annReturn7  := calc_annualized_return(startPrice7,  endPrice7,  actualStartTime, actualEndTime)
+    annReturn8  := calc_annualized_return(startPrice8,  endPrice8,  actualStartTime, actualEndTime)
+    annReturn9  := calc_annualized_return(startPrice9,  endPrice9,  actualStartTime, actualEndTime)
+    annReturn10 := calc_annualized_return(startPrice10, endPrice10, actualStartTime, actualEndTime)
+    etfAnnReturn := calc_annualized_return(etfStartValue, etfCurrentValue, actualStartTime, actualEndTime)
+
+// --- Table Display ---
+var table perfTable = table.new(table_pos, 5, 13, bgcolor=table_bg_color, border_width=1)
+
+// Function to format percentage strings (handles na values)
+f_pct(val) =>
+    na(val) ? "N/A" : str.format("{0,number,#.##}%", val)
+
+// Helper function to add a row to the table
+add_table_row(tbl, row, assetSym, assetWgt, startP, bhReturn, annReturn) =>
+    bhColor  = na(bhReturn)  ? table_text_color : (bhReturn  >= 0 ? color.green : color.red)
+    annColor = na(annReturn) ? table_text_color : (annReturn >= 0 ? color.green : color.red)
+
+    tbl.cell(0, row, assetSym,                              text_color=table_text_color, text_halign=text.align_left)
+    tbl.cell(1, row, f_pct(assetWgt * 100),                 text_color=table_text_color, text_halign=text.align_right)
+    tbl.cell(2, row, na(startP) ? "N/A" : str.tostring(startP, '#.##'), text_color=table_text_color, text_halign=text.align_right)
+    tbl.cell(3, row, f_pct(bhReturn),   text_color=bhColor,  text_halign=text.align_right)
+    tbl.cell(4, row, f_pct(annReturn), text_color=annColor, text_halign=text.align_right)
+
+// Update table only on the last bar
+if barstate.islast
+    // Clear any old table content (optional):
+    // perfTable.clear()
+
+    // Header Row (Row 0)
+    perfTable.cell(0, 0, "Asset",      text_color=table_text_color, text_halign=text.align_left)
+    perfTable.cell(1, 0, "Weight",     text_color=table_text_color, text_halign=text.align_right)
+    perfTable.cell(2, 0, "Start Price", text_color=table_text_color, text_halign=text.align_right)
+    perfTable.cell(3, 0, "Total Return", text_color=table_text_color, text_halign=text.align_right)
+    perfTable.cell(4, 0, "Ann. Return",text_color=table_text_color, text_halign=text.align_right)
+
+    // Date Range Row (Row 1)
+    // Show actualStartTime & actualEndTime if available
+    dateRangeText = "Period: N/A"
+    if calculationReady and not na(actualStartTime) and not na(actualEndTime)
+        startStr = str.format("{0,date,yyyy-MM-dd}", actualStartTime)
+        endStr   = str.format("{0,date,yyyy-MM-dd}", actualEndTime)
+        if useTimeFilter
+            dateRangeText := "Period (Filter): " + startStr + " to " + endStr
+        else
+            dateRangeText := "Period (Full): "   + startStr + " to " + endStr
+    else if calculationReady and not na(actualStartTime)
+        startStr = str.format("{0,date,yyyy-MM-dd}", actualStartTime)
+        dateRangeText := "Period Start: " + startStr + " (End N/A)"
+    else
+        dateRangeText := "Period: N/A (Data Incomplete)"
+
+    // Fill the entire row with a single text cell (colspan not available in v5, but we can approximate with width=5)
+    table.merge_cells(perfTable, 0, 1, 4, 1)
+    perfTable.cell(0, 1, dateRangeText, text_color=table_text_color, text_halign=text.align_center, width=5)
+
+    // Asset Rows (Rows 2 to 11)
+    add_table_row(perfTable,  2, syminfo.ticker(asset1_sym),  asset1_wgt,  startPrice1,  bhReturn1,  annReturn1)
+    add_table_row(perfTable,  3, syminfo.ticker(asset2_sym),  asset2_wgt,  startPrice2,  bhReturn2,  annReturn2)
+    add_table_row(perfTable,  4, syminfo.ticker(asset3_sym),  asset3_wgt,  startPrice3,  bhReturn3,  annReturn3)
+    add_table_row(perfTable,  5, syminfo.ticker(asset4_sym),  asset4_wgt,  startPrice4,  bhReturn4,  annReturn4)
+    add_table_row(perfTable,  6, syminfo.ticker(asset5_sym),  asset5_wgt,  startPrice5,  bhReturn5,  annReturn5)
+    add_table_row(perfTable,  7, syminfo.ticker(asset6_sym),  asset6_wgt,  startPrice6,  bhReturn6,  annReturn6)
+    add_table_row(perfTable,  8, syminfo.ticker(asset7_sym),  asset7_wgt,  startPrice7,  bhReturn7,  annReturn7)
+    add_table_row(perfTable,  9, syminfo.ticker(asset8_sym),  asset8_wgt,  startPrice8,  bhReturn8,  annReturn8)
+    add_table_row(perfTable, 10, syminfo.ticker(asset9_sym),  asset9_wgt,  startPrice9,  bhReturn9,  annReturn9)
+    add_table_row(perfTable, 11, syminfo.ticker(asset10_sym), asset10_wgt, startPrice10, bhReturn10, annReturn10)
+
+    // ETF Total Row (Row 12)
+    totalWeight    = asset1_wgt + asset2_wgt + asset3_wgt + asset4_wgt + asset5_wgt + asset6_wgt + asset7_wgt + asset8_wgt + asset9_wgt + asset10_wgt
+    totalRowBgColor = color.new(color.blue, 70)
+    etfBhColor  = na(etfBhReturn)  ? table_text_color : (etfBhReturn  >= 0 ? color.green : color.red)
+    etfAnnColor = na(etfAnnReturn) ? table_text_color : (etfAnnReturn >= 0 ? color.green : color.red)
+
+    perfTable.cell(0, 12, "ETF Total",
+         text_color=table_text_color, text_halign=text.align_left, bgcolor=totalRowBgColor)
+    perfTable.cell(1, 12, f_pct(totalWeight * 100),
+         text_color=math.abs(totalWeight - 1.0) < 0.001 ? table_text_color : color.orange,
+         text_halign=text.align_right, bgcolor=totalRowBgColor)
+    perfTable.cell(2, 12, na(etfStartValue) ? "N/A" : str.tostring(etfStartValue, '#.##'),
+         text_color=table_text_color, text_halign=text.align_right, bgcolor=totalRowBgColor)
+    perfTable.cell(3, 12, f_pct(etfBhReturn),
+         text_color=etfBhColor, text_halign=text.align_right, bgcolor=totalRowBgColor)
+    perfTable.cell(4, 12, f_pct(etfAnnReturn),
+         text_color=etfAnnColor, text_halign=text.align_right, bgcolor=totalRowBgColor)
+
+// --- Optional: Plot the ETF Value ---
+// Normalize ETF value to start at 100 for easier comparison
+etfValueNormalized = na(etfStartValue) or etfStartValue == 0 or na(etfCurrentValue)
+     ? na
+     : (etfCurrentValue / etfStartValue) * 100
+
+// Only plot if user enabled showEtfPlot AND calculation is ready
+plot((showEtfPlot and calculationReady) ? etfValueNormalized : na,
+     title="ETF Value (Normalized)", color=color.blue, linewidth=2)
+hline(100, "ETF Start Level", color=color.gray, linestyle=hline.style_dashed)

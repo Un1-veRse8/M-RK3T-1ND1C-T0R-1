@@ -1,0 +1,141 @@
+//@version=5
+indicator(title='[blackcat] L2 Ehlers Autocorrelation Periodogram V2', shorttitle='BCL2EAP V2', overlay=false)
+
+// Inputs
+AvgLength = input(3, title='AvgLength')
+
+// Function to calculate Ehlers Autocorrelation Periodogram
+calculate_ehlers_periodogram(close_price, avg_length) =>
+    // Initialize variables
+    M = 0.0
+    X = 0.0
+    Y = 0.0
+    alpha1 = 0.0
+    HP = 0.0
+    a1 = 0.0
+    b1 = 0.0
+    c1 = 0.0
+    c2 = 0.0
+    c3 = 0.0
+    Filt = 0.0
+    Sx = 0.0
+    Sy = 0.0
+    Sxx = 0.0
+    Syy = 0.0
+    Sxy = 0.0
+    Sp = 0.0
+    Spx = 0.0
+    MaxPwr = 0.0
+    DominantCycle = 0.0
+    pi = 2 * math.asin(1)
+
+    // Initialize arrays
+    Corr = array.new_float(50)
+    CosinePart = array.new_float(50)
+    SinePart = array.new_float(50)
+    SqSum = array.new_float(50)
+    R1 = array.new_float(50)
+    R2 = array.new_float(50)
+    Pwr = array.new_float(50)
+
+    // Highpass filter
+    alpha1 := (math.cos(.707 * 2 * pi / 48) + math.sin(.707 * 2 * pi / 48) - 1) / math.cos(.707 * 2 * pi / 48)
+    HP := (1 - alpha1 / 2) * (1 - alpha1 / 2) * (close_price - 2 * close_price[1] + close_price[2]) + 2 * (1 - alpha1) * nz(HP[1]) - (1 - alpha1) * (1 - alpha1) * nz(HP[2])
+
+    // Super Smoother Filter
+    a1 := math.exp(-1.414 * 3.14159 / 10)
+    b1 := 2 * a1 * math.cos(1.414 * pi / 10)
+    c2 := b1
+    c3 := -a1 * a1
+    c1 := 1 - c2 - c3
+    Filt := c1 * (HP + nz(HP[1])) / 2 + c2 * nz(Filt[1]) + c3 * nz(Filt[2])
+
+    // Pearson correlation for each lag
+    for Lag = 0 to 48 by 1
+        M := avg_length == 0 ? Lag : avg_length
+        for count = 0 to M - 1 by 1
+            X := nz(Filt[count])
+            Y := nz(Filt[Lag + count])
+            Sx += X
+            Sy += Y
+            Sxx += X * X
+            Sxy += X * Y
+            Syy += Y * Y
+            Syy
+        if (M * Sxx - Sx * Sx) * (M * Syy - Sy * Sy) > 0
+            array.set(Corr, Lag, (M * Sxy - Sx * Sy) / math.sqrt((M * Sxx - Sx * Sx) * (M * Syy - Sy * Sy)))
+
+    // Calculate power spectrum
+    for Period = 10 to 48 by 1
+        array.set(CosinePart, Period, 0.0)
+        array.set(SinePart, Period, 0.0)
+        for N = 3 to 48 by 1
+            array.set(CosinePart, Period, nz(array.get(CosinePart, Period)) + nz(array.get(Corr, N)) * math.cos(370 / 180 * pi * N / Period))
+            array.set(SinePart, Period, nz(array.get(SinePart, Period)) + nz(array.get(Corr, N)) * math.sin(370 / 180 * pi * N / Period))
+        array.set(SqSum, Period, math.pow(nz(array.get(CosinePart, Period)), 2) + math.pow(nz(array.get(SinePart, Period)), 2))
+
+    for Period = 10 to 48 by 1
+        array.set(R2, Period, nz(array.get(R1, Period)))
+        array.set(R1, Period, .2 * math.pow(nz(array.get(SqSum, Period)), 2) + .8 * nz(array.get(R2, Period)))
+
+    // Find maximum power
+    MaxPwr := .995 * MaxPwr
+    for Period = 10 to 48 by 1
+        MaxPwr := nz(array.get(R1, Period)) > MaxPwr ? nz(array.get(R1, Period)) : MaxPwr
+        MaxPwr
+
+    // Normalize power
+    for Period = 3 to 48 by 1
+        array.set(Pwr, Period, nz(array.get(R1, Period)) / MaxPwr)
+
+    // Calculate dominant cycle
+    Spx := 0
+    Sp := 0
+    for Period = 10 to 48 by 1
+        if nz(array.get(Pwr, Period)) >= .5
+            Spx += Period * nz(array.get(Pwr, Period))
+            Sp += nz(array.get(Pwr, Period))
+            Sp
+    DominantCycle := Sp != 0 ? Spx / Sp : DominantCycle
+
+    [Pwr, DominantCycle]
+
+// Call the function
+[PwrArray, DominantCycleValue] = calculate_ehlers_periodogram(close, AvgLength)
+
+// Plot results
+plot18 = plot(18, 'S18', color=nz(array.get(PwrArray, 18)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 18)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 18)), 0, 0), linewidth=4)
+plot19 = plot(19, 'S19', color=nz(array.get(PwrArray, 19)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 19)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 19)), 0, 0), linewidth=4)
+plot20 = plot(20, 'S20', color=nz(array.get(PwrArray, 20)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 20)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 20)), 0, 0), linewidth=4)
+plot21 = plot(21, 'S21', color=nz(array.get(PwrArray, 21)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 21)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 21)), 0, 0), linewidth=4)
+plot22 = plot(22, 'S22', color=nz(array.get(PwrArray, 22)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 22)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 22)), 0, 0), linewidth=4)
+plot23 = plot(23, 'S23', color=nz(array.get(PwrArray, 23)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 23)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 23)), 0, 0), linewidth=4)
+plot24 = plot(24, 'S24', color=nz(array.get(PwrArray, 24)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 24)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 24)), 0, 0), linewidth=4)
+plot25 = plot(25, 'S25', color=nz(array.get(PwrArray, 25)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 25)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 25)), 0, 0), linewidth=4)
+plot26 = plot(26, 'S26', color=nz(array.get(PwrArray, 26)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 26)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 26)), 0, 0), linewidth=4)
+plot27 = plot(27, 'S27', color=nz(array.get(PwrArray, 27)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 27)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 27)), 0, 0), linewidth=4)
+plot28 = plot(28, 'S28', color=nz(array.get(PwrArray, 28)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 28)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 28)), 0, 0), linewidth=4)
+plot29 = plot(29, 'S29', color=nz(array.get(PwrArray, 29)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 29)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 29)), 0, 0), linewidth=4)
+plot30 = plot(30, 'S30', color=nz(array.get(PwrArray, 30)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 30)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 30)), 0, 0), linewidth=4)
+plot31 = plot(31, 'S31', color=nz(array.get(PwrArray, 31)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 31)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 31)), 0, 0), linewidth=4)
+plot32 = plot(32, 'S32', color=nz(array.get(PwrArray, 32)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 32)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 32)), 0, 0), linewidth=4)
+plot33 = plot(33, 'S33', color=nz(array.get(PwrArray, 33)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 33)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 33)), 0, 0), linewidth=4)
+plot34 = plot(34, 'S34', color=nz(array.get(PwrArray, 34)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 34)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 34)), 0, 0), linewidth=4)
+plot35 = plot(35, 'S35', color=nz(array.get(PwrArray, 35)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 35)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 35)), 0, 0), linewidth=4)
+plot36 = plot(36, 'S36', color=nz(array.get(PwrArray, 36)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 36)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 36)), 0, 0), linewidth=4)
+plot37 = plot(37, 'S37', color=nz(array.get(PwrArray, 37)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 37)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 37)), 0, 0), linewidth=4)
+plot38 = plot(38, 'S38', color=nz(array.get(PwrArray, 38)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 38)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 38)), 0, 0), linewidth=4)
+plot39 = plot(39, 'S39', color=nz(array.get(PwrArray, 39)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 39)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 39)), 0, 0), linewidth=4)
+plot40 = plot(40, 'S40', color=nz(array.get(PwrArray, 40)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 40)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 40)), 0, 0), linewidth=4)
+plot41 = plot(41, 'S41', color=nz(array.get(PwrArray, 41)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 41)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 41)), 0, 0), linewidth=4)
+plot42 = plot(42, 'S42', color=nz(array.get(PwrArray, 42)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 42)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 42)), 0, 0), linewidth=4)
+plot43 = plot(43, 'S43', color=nz(array.get(PwrArray, 43)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 43)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 43)), 0, 0), linewidth=4)
+plot44 = plot(44, 'S44', color=nz(array.get(PwrArray, 44)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 44)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 44)), 0, 0), linewidth=4)
+plot45 = plot(45, 'S45', color=nz(array.get(PwrArray, 45)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 45)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 45)), 0, 0), linewidth=4)
+plot46 = plot(46, 'S46', color=nz(array.get(PwrArray, 46)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 46)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 46)), 0, 0), linewidth=4)
+plot47 = plot(47, 'S47', color=nz(array.get(PwrArray, 47)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 47)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 47)), 0, 0), linewidth=4)
+plot48 = plot(48, 'S48', color=nz(array.get(PwrArray, 48)) > .5 ? color.rgb(255, 255 * (2 * nz(array.get(PwrArray, 48)) - 1), 0) : color.rgb(255 * 2 * nz(array.get(PwrArray, 48)), 0, 0), linewidth=4)
+
+// Plot dominant cycle
+plotDominantCycle = plot(DominantCycleValue, 'DC', color=color.new(color.white, 0), linewidth=3)
+

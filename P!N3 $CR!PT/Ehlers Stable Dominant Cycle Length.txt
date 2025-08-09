@@ -1,0 +1,46 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/ 
+// © nglange3
+
+//@version=5
+indicator("Ehlers Stable Dominant Cycle Length [graylange]", overlay=false)
+
+// Price input
+price = hl2
+
+// Smoothing
+smooth = (price + 2 * nz(price[1]) + 2 * nz(price[2]) + nz(price[3])) / 6
+
+// More stable detrending using Weighted Moving Average
+detrender = ta.wma(price, 3) - ta.wma(price, 7)
+
+// In-Phase and Quadrature Components
+inPhase = nz(detrender[3])
+quadrature = detrender - inPhase
+
+// Phase Calculation
+phase = math.atan(quadrature / inPhase)
+
+// Handle phase wrapping
+deltaPhase = phase - nz(phase[1])
+deltaPhase := deltaPhase < 0 ? deltaPhase + 2 * math.pi : deltaPhase
+
+// Constrain deltaPhase to avoid instability
+deltaPhase := math.max(0.1, math.min(2 * math.pi, deltaPhase))
+
+// Instantaneous period calculation
+instPeriod = 2 * math.pi / deltaPhase
+
+// Declare dominantCycle before assignment
+var float dominantCycle = na
+
+// Apply EMA smoothing to the Instantaneous Period
+smoothedInstPeriod = ta.ema(instPeriod, 5)
+
+// Dominant Cycle Smoothing with adaptive filtering
+dominantCycle := 0.2 * smoothedInstPeriod + 0.8 * nz(dominantCycle)
+
+// Constrain to a reasonable range (prevents spikes)
+dominantCycle := math.max(6, math.min(50, dominantCycle))
+
+// Plot the Dominant Cycle Length
+plot(dominantCycle, title="Dominant Cycle Length", color=color.blue, linewidth=2)

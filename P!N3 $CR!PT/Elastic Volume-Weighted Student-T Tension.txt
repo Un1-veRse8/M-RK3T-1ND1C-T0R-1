@@ -1,0 +1,180 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Xel_Arjona 2025
+
+//@version=6
+indicator("Elastic Volume-Weighted Student-T Tension", overlay=false)
+
+// *** THE ELASTIC VOLUME WEIGHTED STUDENT-T TENSION ***
+// Ver. 1.0.19:03:2025
+// © Xel_Arjona 2025
+
+// Parameters
+decay_factor    = input.float(0.095, "Fixed α Decay Factor", minval=0.0001, maxval=0.9999, tooltip="Translation to N-Bars: 1/factor for RMA equivalent, 2/factor for an EMA-1 N equivalence.")
+htfAlpha        = input.bool(false, "Use HTF closed candle for volume α", tooltip="It could skew if not using time based bars like range, renko, etc.")
+HTFalpha        = input.timeframe( "30", title="HTF volume resolution", tooltip="As historic HTF candle forms, when new LTF candles with higher volume arrives it tends to compress weight ratio and trend skews strong, in order to mitigate this unwanted behaviour a sum of last 2 HTF candles is used, so for example if you want to compund 1 hour, it is recomended to use it's half (30 minute).  NOTE: Always plot in lower TF than this!")
+// BAND factors
+up_x2           = input.float( 1.0, "+σ 2", group = "BAND MULTIPLIERS")
+up_x1           = input.float( 0.5, "+σ 1", group = "BAND MULTIPLIERS")
+dn_x1           = input.float( 0.5, "-σ 1", group = "BAND MULTIPLIERS")
+dn_x2           = input.float( 1.0, "-σ 2", group = "BAND MULTIPLIERS")
+// OSCILLATOR Zones
+osc_x1          = input.float( 2.0, "+ OUTTER", group = "Z-SOCRE OSC ZONES", inline = "upper")
+osc_x2          = input.float( 1.0, "+  INNER", group = "Z-SOCRE OSC ZONES", inline = "upper")
+osc_x3          = input.float( -1.0, "-  INNER", group = "Z-SOCRE OSC ZONES", inline = "bottom")
+osc_x4          = input.float( -2.0, "- OUTTER", group = "Z-SOCRE OSC ZONES", inline = "bottom")
+
+
+
+// @Function Elastic Weighted Student-T Distribution [ Location & dispertion parameters ]
+// @param input                 Series to be procesed by the distribution parameters.
+// @param weightFactor          Any weight alpha(α) factor, fixed or dynamic (series) that meets the following criteria: ∞ < α < 1.0
+// @returns [ ewMean, ewSigma ] A tuple containing the elastic α weighted Mean (eμ) & Sigma (eσ)
+ewStudentTParameters(float input, float weightFactor = 0.1 ) =>
+    alpha = weightFactor
+    
+    // Initialize persistent variables for EWMA calculations
+    var float ewMean = na
+    var float ewVariance = na
+    var float ewSquaredDev = na
+    var float ewFourthPowerDev = na
+    var float ewAbsDev = na
+    
+    // Initial setup on first bar
+    if na(ewMean)
+        ewMean := input
+        ewVariance := 0.0001        // Small non-zero initial value
+        ewSquaredDev := 0.0001
+        ewFourthPowerDev := 0.0001
+        ewAbsDev := 0.0001
+    
+    // Update the elastic weighted mean (location parameter)
+    ewMean := alpha * input + (1 - alpha) * ewMean
+    
+    // Calculate deviation from mean
+    deviation = input - ewMean
+    
+    // Update elastic weighted of squared deviation (variance)
+    ewSquaredDev := alpha * math.pow(deviation, 2) + (1 - alpha) * ewSquaredDev
+    
+    // Update elastic weighted of absolute deviation (MAD)
+    ewAbsDev := alpha * math.abs(deviation) + (1 - alpha) * ewAbsDev
+    
+    // Update elastic weighted of fourth power deviation (kurtosis)
+    ewFourthPowerDev := alpha * math.pow(deviation, 4) + (1 - alpha) * ewFourthPowerDev
+    
+    // Variance output
+    variance = ewSquaredDev
+    
+    // Kurtosis output: E[(X-μ)^4] / (E[(X-μ)^2])^2
+    kurtosis = variance > 0 ? ewFourthPowerDev / math.pow(variance, 2) : 3.0
+    
+    // Estimate degrees of freedom from kurtosis
+    // For t-distribution, kurtosis = 3 + 6/(df-4) for df > 4
+    degreesOfFreedom = 0.0
+    if kurtosis > 3.0
+        degreesOfFreedom := 6.0 / (kurtosis - 3.0) + 4.0
+    else
+        degreesOfFreedom := 30.0  // Default to approximately normal
+    
+    // Bound degrees of freedom
+    degreesOfFreedom := math.max(5.0, math.min(30.0, degreesOfFreedom))
+    
+    // Calculate scale factor for t-distribution
+    scaleFactor = math.sqrt(degreesOfFreedom / (degreesOfFreedom - 2.0))
+    
+    // Calculate robust scale estimate using elastic weighted of absolute deviations
+    // EWMA-MAD/0.6745 is our consistent estimator for std dev under normality
+    robustScale = ewAbsDev / 0.6745
+    
+    // Calculate our sigma output (standard deviation)
+    stdDev = math.sqrt(variance)
+    
+    // Combine robust and standard measures for final scale
+    combinedScale = (robustScale + stdDev) / 2.0
+    
+    // Return adjusted dispersion (ensure minimum value)
+    sigma = math.max(combinedScale * scaleFactor, 0.00001)
+    
+    // OUTPUTS TUPLE
+    [ ewMean, sigma ]
+
+
+// Persistent Variables
+var float wMean      = open     // Weighted location parameter
+var float wSigma     = 0.00     // Weighted scale parameter
+var float alpha_w    = 1.5      // Weighted stability index (alpha)
+var float vol_sum    = 0.0      // Running sum of volumes
+var bool initialized = false
+
+// Definition Variables
+float UB_x1 = na    // Upper Band Tension 1
+float UB_x2 = na    // Upper Band Tension 2
+float BB_x1 = na    // Bottom Band Tension 1
+float BB_x2 = na    // Bottom Band Tension 2
+float oscClose = na
+float oscHigh  = na
+float oscLow   = na
+// Request for Higher Time Frame total Volume (or range if not available)
+float htfVolume  = request.security(syminfo.tickerid, HTFalpha, 0.5*math.sum( nz(volume,ta.tr), 2), lookahead=barmerge.lookahead_on)
+// Build the weight coefficient
+float alphaSmooth = nz( volume, ta.tr ) / htfVolume
+
+// Initialize on first bar
+if not initialized and bar_index > 0
+    wMean := open
+    wSigma := 0.0001
+    alpha_w := 1.5
+    vol_sum := nz(volume, ta.tr)
+    initialized := true
+
+// Main calculation logic
+if initialized
+    lastPrice   = hlcc4
+
+    // Update Running Volume Sum with Decay
+    vol_sum := (1 - decay_factor) * vol_sum + nz(volume, ta.tr)
+    
+    // Calculate volume weight as normalized volume
+    float alphaWeight = htfAlpha ? math.min( alphaSmooth, 0.97) : math.min(nz(volume, ta.tr) / vol_sum, 0.97)  // Cap alpha to not overshoot.
+    
+    // Update Student-T dispersion parameter
+    [ new_mean, new_sigma ] = ewStudentTParameters( lastPrice, alphaWeight )
+    
+    // Apply updates
+    wMean  := new_mean
+    wSigma := new_sigma
+    
+    // Calculate bands using stable distribution quantile approximation
+    UB_x2 := wMean + up_x2 * wSigma
+    UB_x1 := wMean + up_x1 * wSigma
+    BB_x1 := wMean - dn_x1 * wSigma
+    BB_x2 := wMean - dn_x2 * wSigma
+
+    // Calculate oscillator pane and rescale it to fit location parameter as 0.0 [1, -1]
+    oscClose := 2 * ( ( (close - BB_x2) / (UB_x2 - BB_x2) ) - 0.5 )
+    oscHigh  := 2 * ( ( (high  - BB_x2) / (UB_x2 - BB_x2) ) - 0.5 )
+    oscLow   := 2 * ( ( (low   - BB_x2) / (UB_x2 - BB_x2) ) - 0.5 )
+    
+// Plotting
+// Bands:
+ux2 = plot(UB_x2, "+σ x2", color=#6600ff, force_overlay = true)
+ux1 = plot(UB_x1, "+σ x1", color=#6600ff, force_overlay = true)
+plot(wMean, "eVolume μ", color=#6600ff1a, linewidth=2, force_overlay = true)
+dx1 = plot(BB_x1, "-σ x1", color=#6600ff, force_overlay = true)
+dx2 = plot(BB_x2, "-σ x2", color=#6600ff, force_overlay = true)
+// Oscillator %
+oscH = plot(oscHigh,  title="oscHigh", color=#6600ff, histbase=0.0,  style=plot.style_histogram)
+oscC = plot(oscClose, title="oscClose", color=#6600ff, histbase=0.0, style=plot.style_columns)
+oscL = plot(oscLow,   title="oscLow", color=#6600ff, histbase=0.0,   style=plot.style_histogram)
+top = hline(osc_x1,  title="osc x2 +σ", color=color.rgb(255, 153, 0, 95), linestyle=hline.style_dotted)
+loc = hline(0.0,  title="osc eμ", color=color.red, linestyle=hline.style_dashed )
+pqu = hline(osc_x2,  title="osc x1 +σ", color=color.rgb(255, 153, 0, 95), linestyle=hline.style_dotted )
+pqd = hline(osc_x3, title="osc x1 -σ", color=color.rgb(255, 153, 0, 95), linestyle=hline.style_dotted )
+bot = hline(osc_x4, title="osc x2 -σ", color=color.rgb(255, 153, 0, 95), linestyle=hline.style_dotted )
+
+// BAND Fills
+fill(ux1, ux2, color=#6600ff0a, editable=true, title="Upper BAND Shadow")
+fill(dx1, dx2, color=#6600ff0a, editable=true, title="Bottom BAND Shadow")
+// OSCILLATOR Fills
+fill(pqu, top, color=#6600ff15, editable=true, title="Upper OSC Shadow")
+fill(bot, pqd, color=#6600ff15, editable=true, title="Bottom OSC Shadow")

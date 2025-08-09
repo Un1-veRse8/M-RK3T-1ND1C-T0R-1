@@ -1,0 +1,114 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © InvestorUnknown
+//                                                                                  {||}                   
+//                                                       ,                          {||}          
+//                                                  ,,,,,                           {||}
+//                                                ,,,,,       ,       ,,            {||}       
+//                                    ,         ,,,, ,       ,,     ,,,             {||}       
+//             .                   , ,         ,,,,  ,     ,,,,   .,,               {||}            ╔╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╗
+//             ,,                 ,       ,,   ,,,,,,,  ,  ,      ,                 {||}            ╠╬╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╬╣  
+//             ,,                 ,,   ,  ,,  ,,,,,, ,,,,    , ,                    {||}            ╠╣  /$$$$$$                                           /$$                         ╠╣
+//              .,         ,      ,,,  ,,,,,,,,,,,,,, ,,  ,,  , ,         ,,        {||}            ╠╣ |_  $$_/                                          | $$                         ╠╣
+//                           ,  .  ,, ,,,,,,,,,,,,, ,    ,,, , ,,    ,   ,          {||}            ╠╣   | $$   /$$$$$$$  /$$    /$$ /$$$$$$   /$$$$$$$ /$$$$$$    /$$$$$$   /$$$$$$  ╠╣
+//                   ,,           ,,, ,,,,,,,,,,,,,,,,,,,,,,  ,,,   ,,              {||}            ╠╣   | $$  | $$__  $$|  $$  /$$//$$__  $$ /$$_____/|_  $$_/   /$$__  $$ /$$__  $$ ╠╣
+//               , ,   ,,,     .,,,,,,,,,,,, ,,,  ,,,,,,,,   ,,,    ,,              {||}            ╠╣   | $$  | $$  \ $$ \  $$/$$/| $$$$$$$$|  $$$$$$   | $$    | $$  \ $$| $$  \__/ ╠╣      
+//         .,     , ,,  ,,    ,,, ,,,,,,, ,,  ,,, ,,,,, ,,, ,  ,,   ,,              {||}            ╠╣   | $$  | $$  | $$  \  $$$/ | $$_____/ \____  $$  | $$ /$$| $$  | $$| $$       ╠╣     
+//            ,   ,,,,,  ,    ,,,, ,, , ,,,,,,,,,,,,,,,,,,,,,, ,,  ,,               {||}            ╠╣  /$$$$$$| $$  | $$   \  $/  |  $$$$$$$ /$$$$$$$/  |  $$$$/|  $$$$$$/| $$       ╠╣   
+//               .    //./ /// ,,,,,,,,,,,,,,,. ,,,,,,,,,,,,,,,,,,                  {||}            ╠╣ |______/|__/  |__/    \_/    \_______/|_______/    \___/   \______/ |__/       ╠╣
+//                ,  /         ,., ,,,,,,,,,,, ,,,,,,,   ,,,,,,,                    {||}            ╠╣                                                                                ╠╣
+//            .  ,,,  ,/ ///./   ,,,.,,,,,,,,,,,,,,,      ,, , ,                    {||}            ╠╣                                                                                ╠╣
+//             ,,,,,,  //./ , /    .,,.,,, ,,,,,, ,.     ,,,,,,,                    {||}            ╠╣                                                                                ╠╣
+//              ,,,,   //  *, / / ,,,,,,,,,,,,          ,, ,,,,,                    {||}            ╠╣    /$$   /$$           /$$                                                     ╠╣
+//               ,,  // ////.*/// / ,.,,,,,.,, ,,  ,,,, ,,,,,,                      {||}            ╠╣   | $$  | $$          | $$                                                     ╠╣
+//                   ,  /////    //  , ,,,,,, ,,,, ,,,,,  ,,, / /.                  {||}            ╠╣   | $$  | $$ /$$$$$$$ | $$   /$$ /$$$$$$$   /$$$$$$  /$$  /$$  /$$ /$$$$$$$    ╠╣
+//              ,,   ,         ////// ,,,,,,,,,  ,,,,,,,,/ ///  / //                {||}            ╠╣   | $$  | $$| $$__  $$| $$  /$$/| $$__  $$ /$$__  $$| $$ | $$ | $$| $$__  $$   ╠╣
+//                         ///// .// ,,,,,,  ,, ,,,, ,,, ///*  //*///               {||}            ╠╣   | $$  | $$| $$  \ $$| $$$$$$/ | $$  \ $$| $$  \ $$| $$ | $$ | $$| $$  \ $$   ╠╣
+//                           //  .           ,, .// ,,      ///, ///                {||}            ╠╣   | $$  | $$| $$  | $$| $$_  $$ | $$  | $$| $$  | $$| $$ | $$ | $$| $$  | $$   ╠╣
+//                        //////        ,,,,    ///// ,.        ,                   {||}            ╠╣   |  $$$$$$/| $$  | $$| $$ \  $$| $$  | $$|  $$$$$$/|  $$$$$/$$$$/| $$  | $$   ╠╣
+//                   *///////. //              /  */////*                           {||}            ╠╣    \______/ |__/  |__/|__/  \__/|__/  |__/ \______/  \_____/\___/ |__/  |__/   ╠╣ 
+//                         .,,  // ,,,,,,,,,, //* ,,,  //////                       {||}            ╠╬╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╦╬╣
+//                           ,,,,,   ,,,,,, ,.,,,,,,,                               {||}            ╚╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╩╝
+//                               ,,,,,,,,,,,, ,,                                    {||}          
+//                                  ,,,,,,,,,                                       {||}                                                                                                                                  
+//                                                                                  {||} 
+//                                                                                  {||} 
+
+//@version=6
+indicator("Euclidean Range [InvestorUnknown]", "Euclidean Range", overlay=false)
+
+// - - - - - FUNCTIONS - - - - - //{
+
+// Calculates the Euclidean distance between two time series over a given window length.
+// It is essentially the square root of the sum of squared differences between `src` and `ref`.
+euclidean_distance(src, ref, len) =>
+    var float sum_sq_diff = na
+    sum_sq_diff := 0.0
+    for i = 0 to len - 1
+        diff = src[i] - ref[i]
+        sum_sq_diff += diff * diff
+    math.sqrt(sum_sq_diff)
+
+// Computes Z-Score of a time series over a lookback window.
+// Z-Score = (value - mean) / standard deviation
+z_score(source, lookback) =>
+    avg = ta.sma(source, lookback)
+    stdev = ta.stdev(source, lookback)
+    z = (source - avg) / stdev
+//}
+
+// - - - - - STRINGS - - - - - //{
+var string G1                       = "Indicator Settings"
+var string G2                       = "Plot Settings"
+//}
+
+// - - - - - INPUTS - - - - - //{
+simple int    length                = input.int(14, minval=1, title="Window Length", group = G1)
+simple int    z_len                 = input.int(100, "Z-Score Length", group = G1)
+series float  source                = input.source(close, "Source", group = G1)
+simple string avg_type              = input.string("HMA", "Average Type", options = ["SMA", "EMA", "HMA"], group = G1)
+
+// Plotting options
+simple bool   intrabar              = input.bool(true, "Allow Intra-bar Updating", group = G2)
+simple bool   plot_ma               = input.bool(false, "Plot moving average", group = G2)
+simple bool   color_bg              = input.bool(true, "Color Background", group = G2)
+//}
+
+// - - - - - CALCULATIONS - - - - - //{
+series float  reference             = switch avg_type
+    "SMA" =>    ta.sma(source, length) 
+    "EMA" =>    ta.ema(source, length)
+    "HMA" =>    ta.hma(source, length)
+
+// Euclidean distance between `source` and `reference` over the last `length` bars
+series float  dist                  = euclidean_distance(source, reference, length)
+
+// Create dynamic upper and lower bands around the reference line based on distance
+series float  upper                 = reference + dist
+series float  lower                 = reference - dist
+
+// Ratio of distance to source and its inverse; gives a sense of proportional deviation
+series float  dist_r                = dist / source
+series float  dist_v                = source / dist
+
+// Z-scores for the relative distance metrics, normalized over time
+series float  z_r                   = z_score(dist_r, z_len)
+series float  z_v                   = z_score(dist_v, z_len)
+//}
+
+// - - - - - PLOTS - - - - - //{
+// Choose whether to update plots on each tick or only on bar close
+simple int i = intrabar ? 0 : 1
+
+plot(plot_ma ? reference[i] : na, color=color.blue, title="Moving Average", force_overlay = true)
+plot(upper[i], color=color.purple, title="Upper bound", force_overlay = true, linewidth = 2)
+plot(lower[i], color=color.yellow, title="Lower bound", force_overlay = true, linewidth = 2)
+
+hline(0, "Mid line", color = color.gray, linewidth = 2)
+plot(z_r[i], "High-volatility Z-Score", color = color.white, linewidth = 3)
+plot(z_v[i], "Low-volatility Z-Score", color = color.red, linewidth = 3)
+
+// Background color when Z_v is more dominant and rising - low volatility warning
+// Uses a gradient to show intensity
+color bg_col = (z_v > z_r and z_v > 0.5) ? color.from_gradient(z_v, 0, 10, color.new(color.red, 90), color.new(color.red, 50)) : na
+bgcolor(color_bg ? bg_col[i] : na, force_overlay = true)
+//}

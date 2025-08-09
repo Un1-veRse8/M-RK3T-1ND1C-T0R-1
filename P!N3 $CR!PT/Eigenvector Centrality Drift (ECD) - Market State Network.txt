@@ -1,0 +1,240 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Eigenvector Centrality Drift (ECD) - Market State Network", overlay=false, precision=3)
+
+// ========================================
+// INPUT PARAMETERS
+// ========================================
+
+// State Definition Parameters
+group_states = "🌐 Market State Configuration"
+n_states = input.int(6, "Number of Market States", minval=3, maxval=9, group=group_states, tooltip="Number of distinct market micro-states to track.\n\n• 3-4: Simple (Up/Down/Sideways)\n• 5-6: Balanced (recommended)\n• 7-9: Complex (more nuanced)")
+
+price_weight = input.float(0.4, "Price Change Weight", minval=0, maxval=1, step=0.1, group=group_states, tooltip="Weight for price movement in state classification.\n\nHigher = states more defined by direction")
+
+vol_weight = input.float(0.3, "Volatility Weight", minval=0, maxval=1, step=0.1, group=group_states, tooltip="Weight for volatility in state classification.\n\nHigher = states more defined by volatility regime")
+
+volume_weight = input.float(0.3, "Volume Weight", minval=0, maxval=1, step=0.1, group=group_states, tooltip="Weight for volume in state classification.\n\nHigher = states more defined by participation")
+
+// Network Analysis Parameters
+group_network = "🔗 Network Analysis"
+transition_window = input.int(50, "Transition Matrix Window", minval=20, maxval=200, group=group_network, tooltip="Lookback period for building state transition matrix.\n\n• Shorter: Adapts quickly to regime changes\n• Longer: More stable network structure")
+
+influence_decay = input.float(0.85, "Influence Decay Factor", minval=0.5, maxval=0.99, step=0.01, group=group_network, tooltip="How much influence propagates through network.\n\n• Higher: States influence distant states more\n• Lower: Only immediate transitions matter")
+
+drift_sensitivity = input.float(1.5, "Drift Detection Sensitivity", minval=0.5, maxval=3, step=0.1, group=group_network, tooltip="Z-score threshold for significant centrality drift.\n\n• Lower: More drift signals\n• Higher: Only major shifts")
+
+// Visual Settings
+group_visual = "🎨 Visualization"
+show_network = input.bool(true, "Show Network Visualization", group=group_visual, tooltip="Display the state network structure")
+show_centrality = input.bool(true, "Show Centrality Score", group=group_visual, tooltip="Display current state's centrality measure")
+show_drift = input.bool(true, "Show Drift Indicator", group=group_visual, tooltip="Display centrality drift signal")
+show_state_map = input.bool(true, "Show State Map", group=group_visual, tooltip="Display current state classification")
+color_scheme = input.string("Quantum", "Color Scheme", options=["Quantum", "Neural", "Plasma", "Matrix"], group=group_visual)
+
+// ========================================
+// STATE CLASSIFICATION
+// ========================================
+
+// Calculate normalized metrics for state classification
+price_change = ta.roc(close, 1)
+price_norm = (price_change - ta.sma(price_change, 20)) / (ta.stdev(price_change, 20) + 1e-10)
+
+volatility = ta.atr(1) / close * 100
+vol_norm = (volatility - ta.sma(volatility, 20)) / (ta.stdev(volatility, 20) + 1e-10)
+
+volume_ratio = volume / ta.sma(volume, 20)
+volume_norm = (volume_ratio - 1) / (ta.stdev(volume_ratio, 20) + 1e-10)
+
+// Composite state score
+state_score = price_norm * price_weight + vol_norm * vol_weight + volume_norm * volume_weight
+
+// Classify into discrete states (simplified k-means style)
+state_boundaries = array.new_float(n_states - 1)
+for i = 1 to n_states - 1
+    boundary = -3 + (6 * i / n_states)
+    array.set(state_boundaries, i - 1, boundary)
+
+current_state = 0
+for i = 0 to n_states - 2
+    if state_score > array.get(state_boundaries, i)
+        current_state := i + 1
+
+// ========================================
+// TRANSITION MATRIX CONSTRUCTION
+// ========================================
+
+// Initialize transition count matrix (flattened for Pine Script)
+var transition_counts = array.new_float(n_states * n_states, 0)
+var state_history = array.new_int(transition_window, 0)
+
+// Update state history
+array.shift(state_history)
+array.push(state_history, current_state)
+
+// Update transition counts
+if barstate.isconfirmed and array.size(state_history) >= 2
+    prev_state = array.get(state_history, 1)
+    matrix_index = prev_state * n_states + current_state
+    current_count = array.get(transition_counts, matrix_index)
+    array.set(transition_counts, matrix_index, current_count + 1)
+
+// Decay old transitions (rolling window effect)
+for i = 0 to array.size(transition_counts) - 1
+    array.set(transition_counts, i, array.get(transition_counts, i) * 0.98)
+
+// ========================================
+// CENTRALITY CALCULATION
+// ========================================
+
+// Calculate row sums for transition probabilities
+var row_sums = array.new_float(n_states, 0)
+for i = 0 to n_states - 1
+    sum = 0.0
+    for j = 0 to n_states - 1
+        sum += array.get(transition_counts, i * n_states + j)
+    array.set(row_sums, i, math.max(sum, 1))
+
+// Calculate influence scores (simplified eigenvector centrality)
+var influence_scores = array.new_float(n_states, 1.0 / n_states)
+var new_scores = array.new_float(n_states, 0)
+
+// Power iteration (3 iterations for efficiency)
+for iter = 1 to 3
+    // Calculate new scores
+    for i = 0 to n_states - 1
+        score = 0.0
+        for j = 0 to n_states - 1
+            transition_prob = array.get(transition_counts, j * n_states + i) / array.get(row_sums, j)
+            score += array.get(influence_scores, j) * transition_prob * influence_decay
+        array.set(new_scores, i, score)
+    
+    // Normalize and update
+    total = 0.0
+    for i = 0 to n_states - 1
+        total += array.get(new_scores, i)
+    
+    if total > 0
+        for i = 0 to n_states - 1
+            array.set(influence_scores, i, array.get(new_scores, i) / total)
+
+// Get current state's centrality
+current_centrality = array.get(influence_scores, current_state)
+
+// Calculate centrality drift
+centrality_ema_fast = ta.ema(current_centrality, 5)
+centrality_ema_slow = ta.ema(current_centrality, 20)
+centrality_drift = (centrality_ema_fast - centrality_ema_slow) / (centrality_ema_slow + 1e-10)
+
+// Normalize drift
+drift_mean = ta.sma(centrality_drift, 50)
+drift_std = ta.stdev(centrality_drift, 50)
+drift_z = drift_std > 0 ? (centrality_drift - drift_mean) / drift_std : 0
+
+// Find dominant state
+max_influence = 0.0
+dominant_state = 0
+for i = 0 to n_states - 1
+    if array.get(influence_scores, i) > max_influence
+        max_influence := array.get(influence_scores, i)
+        dominant_state := i
+
+// ========================================
+// COLOR SCHEMES
+// ========================================
+
+get_quantum_color(value) =>
+    color.from_gradient(value * 100, 0, 100, color.new(#00ffff, 20), color.new(#ff00ff, 0))
+
+get_neural_color(value) =>
+    color.from_gradient(value * 100, 0, 100, color.new(#00ff00, 20), color.new(#0000ff, 0))
+
+get_plasma_color(value) =>
+    color.from_gradient(value * 100, 0, 100, color.new(#ffff00, 20), color.new(#ff0099, 0))
+
+get_matrix_color(value) =>
+    color.from_gradient(value * 100, 0, 100, color.new(#00ff00, 20), color.new(#003300, 0))
+
+base_color = switch color_scheme
+    "Quantum" => get_quantum_color(current_centrality)
+    "Neural" => get_neural_color(current_centrality)
+    "Plasma" => get_plasma_color(current_centrality)
+    "Matrix" => get_matrix_color(current_centrality)
+
+// ========================================
+// VISUALIZATION
+// ========================================
+
+// Background network effect
+network_alpha = show_network ? math.min(90, 95 - current_centrality * 50) : 100
+bgcolor(show_network ? color.new(base_color, network_alpha) : na)
+
+// Centrality score line
+plot(show_centrality ? current_centrality : na, "Centrality Score", color=base_color, linewidth=3)
+plot(show_centrality ? current_centrality : na, "Centrality Glow", color=color.new(base_color, 50), linewidth=6)
+
+// Drift indicator
+plot(show_drift ? drift_z : na, "Centrality Drift", color=drift_z > 0 ? color.new(#00ff00, 0) : color.new(#ff0000, 0), linewidth=2, style=plot.style_histogram)
+
+// Threshold lines
+hline(0, "Equilibrium", color=color.gray, linewidth=1)
+hline(drift_sensitivity, "Drift Threshold", color=color.new(color.white, 90), linestyle=hline.style_dotted)
+hline(-drift_sensitivity, "Drift Threshold", color=color.new(color.white, 90), linestyle=hline.style_dotted)
+
+// State transition signals
+plotshape(show_network and math.abs(drift_z) > drift_sensitivity ? 0 : na, "Drift Signal", style=shape.diamond, location=location.absolute, color=base_color, size=size.small)
+
+// ========================================
+// STATE MAP DASHBOARD
+// ========================================
+
+var table state_map = table.new(position.top_right, 2, n_states + 2, bgcolor=color.new(#000000, 85), border_color=color.new(base_color, 50), border_width=1)
+
+if barstate.islast and show_state_map
+    // Spacer
+    table.cell(state_map, 0, 0, "", text_size=size.tiny)
+    table.cell(state_map, 1, 0, "", text_size=size.tiny)
+    
+    // Header
+    table.cell(state_map, 0, 1, "State", text_color=color.white, text_size=size.small)
+    table.cell(state_map, 1, 1, "Centrality", text_color=color.white, text_size=size.small)
+    
+    // State centralities
+    for i = 0 to n_states - 1
+        state_name = "S" + str.tostring(i)
+        centrality_val = array.get(influence_scores, i)
+        
+        // Visual bar
+        bar_length = math.round(centrality_val * 10)
+        bar = ""
+        for j = 0 to 9
+            bar := bar + (j < bar_length ? "▰" : "▱")
+        
+        is_current = i == current_state
+        is_dominant = i == dominant_state
+        
+        text_color = is_current ? base_color : is_dominant ? color.yellow : color.gray
+        
+        table.cell(state_map, 0, i + 2, state_name + (is_current ? " ←" : "") + (is_dominant ? " ★" : ""), text_color=text_color, text_size=size.small)
+        table.cell(state_map, 1, i + 2, bar, text_color=text_color, text_size=size.small, text_font_family=font.family_monospace)
+
+// ========================================
+// INFORMATION PANEL
+// ========================================
+
+var table info_panel = table.new(position.bottom_left, 1, 1, bgcolor=color.new(#000000, 90), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast
+    info_text = "🌐 ECD Analysis:\n━━━━━━━━━━━━━━━━━━━━\nCurrent State: S" + str.tostring(current_state) + "\nCentrality: " + str.tostring(current_centrality, "#.###") + "\nDominant: S" + str.tostring(dominant_state) + "\n━━━━━━━━━━━━━━━━━━━━\nDrift Z-Score: " + str.tostring(drift_z, "#.##") + "\n" + (math.abs(drift_z) > drift_sensitivity ? "⚠️ REGIME SHIFT LIKELY" : "✓ Stable Network") + "\n━━━━━━━━━━━━━━━━━━━━\nHigh centrality = State controls\nmarket transitions"
+    
+    table.cell(info_panel, 0, 0, info_text, text_color=color.new(color.white, 20), text_size=size.tiny, text_halign=text.align_left, text_font_family=font.family_monospace)
+
+// ========================================
+// ALERTS
+// ========================================
+
+alertcondition(math.abs(drift_z) > drift_sensitivity, "ECD Regime Shift", "Significant centrality drift detected - potential regime change")
+alertcondition(current_state != current_state[1], "ECD State Change", "Market state transition occurred")
+alertcondition(dominant_state != dominant_state[1], "ECD Dominance Shift", "Dominant market state has changed")

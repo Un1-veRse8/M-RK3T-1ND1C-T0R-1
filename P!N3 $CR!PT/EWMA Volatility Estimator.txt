@@ -1,0 +1,43 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © piirsalu
+
+//@version=5
+indicator("EWMA Volatility Estimator", overlay=false)
+
+/////////////////////////////////////////////////////////////////////////////////////
+//                                 . DESCRIPTION .                                 //
+/////////////////////////////////////////////////////////////////////////////////////
+// This indicator calculates time-varying volatility using the Exponentially 
+// Weighted Moving Average (EWMA) method. It's based on the RiskMetrics model 
+// popularized by J.P. Morgan, using a decay factor (lambda) of 0.94.
+// Useful for volatility regime detection, risk-adjusted position sizing, 
+// or integrating into broader alpha models.
+
+/////////////////////////////////////////////////////////////////////////////////////
+//                                . CALCULATIONS .                                 //
+/////////////////////////////////////////////////////////////////////////////////////
+
+// Calculate log returns (preferred in quant models)
+ret = math.log(close / close[1])
+
+// Square the returns to get variance proxy
+sq_ret = ret * ret
+
+// Set EWMA lambda (decay factor) to 0.94
+// Corresponds to an EMA period of approximately 26 bars
+lambda = 0.94
+period = math.round(2 / (1 - lambda) - 1)
+
+// Apply EMA to squared returns to estimate variance
+ewma_var = ta.ema(sq_ret, period)
+
+// Take square root of variance to get volatility estimate
+// Multiply by 100 to convert to percentage
+ewma_vol = math.sqrt(ewma_var) * 100
+
+/////////////////////////////////////////////////////////////////////////////////////
+//                                  . OUTPUT .                                     //
+/////////////////////////////////////////////////////////////////////////////////////
+
+// Plot EWMA volatility on a separate pane
+plot(ewma_vol, title="EWMA Volatility", color=color.orange)

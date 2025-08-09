@@ -1,0 +1,162 @@
+//══════════════════════════════════════════════════════════════════════════════
+// ►►►►►►►►►►►►►►►►►►►►► CREDITS & COPYRIGHT ◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄
+//══════════════════════════════════════════════════════════════════════════════
+//
+//   SCRIPT NAME    : Granger Causality Flow Indicator
+//   AUTHOR         : mastertop
+//   VERSION        : 1.0 // Initial version of this indicator
+//   RELEASE DATE   : 2025-05-08
+//
+//   TWITTER        : https://x.com/Top_Astray
+//
+//══════════════════════════════════════════════════════════════════════════════
+// ►►►►►►►►►►►►►►►►►►►►►►►►► LICENSE ◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄
+//══════════════════════════════════════════════════════════════════════════════
+//
+//   This source code is subject to the terms of the Mozilla Public License 2.0
+//   at https://mozilla.org/MPL/2.0/
+//
+//   © mastertop, 2025
+//
+//══════════════════════════════════════════════════════════════════════════════
+
+//@version=6
+//@version=6
+indicator("Granger Causality Flow Indicator", shorttitle="GC Flow")
+
+// ————— Constants —————
+color GC_STRONG_COLOR = color.new(color.green, 70)
+color GC_WEAK_COLOR = color.new(color.orange, 70)
+color GC_NONE_COLOR = color.new(color.gray, 85)
+color GC_BIDIRECTIONAL_COLOR = color.new(color.blue, 70)
+
+// ————— Inputs —————
+string grp1 = "Data Series & Preprocessing"
+string sym1Input = input.symbol("BINANCE:BTCUSDT", "Symbol 1 (X)", group=grp1)
+string sym2Input = input.symbol("NASDAQ:QQQ", "Symbol 2 (Y)", group=grp1) // Y is the target series for X->Y
+bool useDiffInput = input.bool(true, "Use Differencing (for Stationarity Proxy)", group=grp1)
+int dataWindowInput = input.int(50, "Calculation Window (N)", minval=10, group=grp1, tooltip="Window for AR model coefficient estimation and variance calculation.")
+
+string grp2 = "Granger Causality Settings"
+int lagPInput = input.int(1, "Lag Order (p)", minval=1, maxval=1, group=grp2, tooltip="Currently fixed at p=1 due to Pine Script limitations for AR models. This is the lag used (e.g., X[1] and Y[1]).")
+float significanceThresholdInput = input.float(0.1, "Significance Threshold for GC Score", minval=0.01, maxval=0.99, step=0.01, group=grp2, tooltip="Score (0 to 1). Higher score means stronger causality. Score = 1 - (Var_UR / Var_R).")
+
+// ————— Function Declarations —————
+
+// @function        Calculates coefficients for AR(1) model: series_t = c + a * series_lag1_t + error_t
+// @param series_t  The current value of the time series.
+// @param series_lag1_t The lagged (by 1 bar) value of the time series.
+// @param window    The lookback window for calculating correlation, stdev, and sma.
+// @returns         [coefficient_a, constant_c]
+ar1Coefficients(series_t, series_lag1_t, window) =>
+    float ser_t_stdev = ta.stdev(series_t, window)
+    float ser_lag1_stdev = ta.stdev(series_lag1_t, window)
+    float coeff_a = 0.0
+    if ser_lag1_stdev > 0 // Avoid division by zero
+        coeff_a := ta.correlation(series_t, series_lag1_t, window) * ser_t_stdev / ser_lag1_stdev
+    else
+        coeff_a := 0.0 // If lagged series has no variance, no linear relationship can be determined this way
+    float const_c = ta.sma(series_t, window) - coeff_a * ta.sma(series_lag1_t, window)
+    [coeff_a, const_c]
+
+// @function        Calculates Granger Causality score from a causing series to a target series.
+// @description     Tests if `causingSeries` Granger-causes `targetSeries`.
+// @param targetSeriesY The series being predicted (Y_t).
+// @param causingSeriesX The series whose past values are tested for predictive power (X_t).
+// @param lag           The lag order (fixed at 1 for this implementation).
+// @param window        The rolling window size for calculations.
+// @returns         Granger Causality score (0 to 1, higher is more significant). Returns `na` if calculation is not possible.
+calculateGrangerCausalityScore(targetSeriesY, causingSeriesX, lag, window) =>
+    // Ensure 'lag' is used, even if fixed, for clarity with p=1
+    float y_t = targetSeriesY
+    float y_lag = targetSeriesY[lag]
+    float x_lag = causingSeriesX[lag]
+
+    // 1. Restricted Model: Y_t = c_R + a_R * Y_{t-lag} + residuals_R
+    [a_R, c_R] = ar1Coefficients(y_t, y_lag, window)
+    float residuals_R = y_t - (c_R + a_R * y_lag)
+    float var_R = ta.variance(residuals_R, window)
+
+    // 2. Unrestricted Model (Proxy): residuals_R_t = c_UR' + b_UR * X_{t-lag} + residuals_UR
+    //    This tests if X_{t-lag} can explain the residuals from the restricted AR(1) model of Y.
+    [b_UR, c_UR_prime] = ar1Coefficients(residuals_R, x_lag, window) // Using AR(1) structure for this step
+    float residuals_UR = residuals_R - (c_UR_prime + b_UR * x_lag)
+    float var_UR = ta.variance(residuals_UR, window)
+
+    // Calculate GC Score: 1 - (Var_UR / Var_R)
+    // Score > 0 suggests X helps predict Y (Var_UR < Var_R)
+    // Score closer to 1 indicates stronger predictive power.
+    float score = na
+    if var_R > 1e-9 // Avoid division by zero or near-zero (if Y is perfectly predictable by its own lag)
+        score := 1.0 - (var_UR / var_R)
+        score := score < 0 ? 0 : score // Cap score at 0 if var_UR > var_R (X made prediction worse or no better)
+    else if var_UR < 1e-9 // If var_R is ~0 and var_UR is also ~0, means Y perfectly predicted by Y_lag, X adds nothing.
+        score := 0.0
+
+    score // Returns na if var_R is effectively zero and var_UR is not, or other calculation issues.
+
+// ————— Data Fetching and Preprocessing —————
+// Requesting close prices for the two symbols
+float source1_raw = request.security(sym1Input, timeframe.period, close)
+float source2_raw = request.security(sym2Input, timeframe.period, close)
+
+// Optional differencing for stationarity proxy
+float series1 = useDiffInput ? ta.change(source1_raw) : source1_raw
+float series2 = useDiffInput ? ta.change(source2_raw) : source2_raw
+
+// Handling potential 'na' values from differencing or initial bars for lagged series
+// Ensure enough data for lags and window. Calculations might yield 'na' at the start.
+bool dataReady = not na(series1[lagPInput + dataWindowInput -1]) and not na(series2[lagPInput + dataWindowInput -1])
+
+// ————— Granger Causality Calculations —————
+float gc_X_to_Y = na // X (series1) causing Y (series2)
+float gc_Y_to_X = na // Y (series2) causing X (series1)
+
+if dataReady
+    gc_X_to_Y := calculateGrangerCausalityScore(series2, series1, lagPInput, dataWindowInput)
+    gc_Y_to_X := calculateGrangerCausalityScore(series1, series2, lagPInput, dataWindowInput)
+
+// ————— Visualization —————
+// Plotting GC scores
+const string gc_X_to_Y_String   =   "GC Score: X -> Y "
+const string gc_Y_to_X_String   =   "GC Score: Y -> X "
+plot(gc_X_to_Y, gc_X_to_Y_String, color=color.blue, display=display.data_window)
+plot(gc_Y_to_X, gc_Y_to_X_String, color=color.red, display=display.data_window)
+hline(significanceThresholdInput, "Significance Threshold", color=color.gray, linestyle=hline.style_dashed)
+
+// Determine causal direction text and background color
+bool s1_causes_s2 = gc_X_to_Y > significanceThresholdInput
+bool s2_causes_s1 = gc_Y_to_X > significanceThresholdInput
+
+string causalDirectionText = "No Significant Causality"
+color bgColor = GC_NONE_COLOR
+
+if s1_causes_s2 and s2_causes_s1
+    causalDirectionText := "Bidirectional (" + sym1Input + " <=> " + sym2Input + ")"
+    bgColor := GC_BIDIRECTIONAL_COLOR
+else if s1_causes_s2
+    causalDirectionText := sym1Input + " -> " + sym2Input
+    bgColor := GC_STRONG_COLOR // Assuming X->Y is primary interest, or could use another color
+else if s2_causes_s1
+    causalDirectionText := sym2Input + " -> " + sym1Input
+    bgColor := GC_WEAK_COLOR // Assuming Y->X is secondary, or could use another color
+
+// Background color based on the dominant or detected causality
+bgcolor(color.new(bgColor,80))
+
+// Display causal direction on chart (using a table for cleaner display)
+var table gcTable = table.new(position.top_right, 1, 1)
+if barstate.islast
+    table.clear(gcTable,0,0,0,0)
+    table.cell(gcTable, 0, 0, "Granger Causality:\n" + causalDirectionText, bgcolor=bgColor, text_color=color.white)
+
+// ————— Alerts —————
+// Alert for X -> Y emerging
+alertcondition(s1_causes_s2 and not s1_causes_s2[1], title="GC Alert: X" + " now Granger-causes Y", message= "GC Alert: X" + " now Granger-causes Y")
+
+// Alert for Y -> X emerging
+alertcondition(s2_causes_s1 and not s2_causes_s1[1], title="GC Alert: Y" + " now Granger-causes X", message= "GC Alert: Y" + " now Granger-causes X")
+
+// Alert for change in direction or cessation (more complex, simplified here)
+alertcondition((s1_causes_s2[1] and not s1_causes_s2) or (s2_causes_s1[1] and not s2_causes_s1),title="GC Alert: Causality Changed/Ceased",message="Granger causality relationship between X" + " and " +  "Y has changed or ceased.")
+

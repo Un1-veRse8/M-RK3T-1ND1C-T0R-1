@@ -1,0 +1,47 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// @ Julien_Eche
+// Description updated
+
+//@version=6
+indicator('Ehlers Adaptive RSI', shorttitle='Adaptive RSI', overlay = false)
+
+// Input source
+src = input(close, 'Source')
+
+// Dynamic period calculation based on ATR and EMA (inspired by Ehlers' methods)
+inst_period = ta.ema(0.33 * (360 / (math.abs(ta.atr(1)) + 0.00001)), 50)
+period_val = ta.ema(inst_period, 10)
+length = math.max(5, math.min(30, math.round(period_val / 2)))
+
+// Initialize moving averages
+var float avgGain = na
+var float avgLoss = na
+
+// Calculate gains and losses
+gain = math.max(0, src - src[1])
+loss = math.max(0, src[1] - src)
+
+// Adaptive moving averages (Modified Wilder's method)
+avgGain := na(avgGain) ? gain : (avgGain * (length - 1) + gain) / length
+avgLoss := na(avgLoss) ? loss : (avgLoss * (length - 1) + loss) / length
+
+// Compute Adaptive RSI
+rs = avgLoss == 0 ? 100.0 : avgGain / avgLoss
+adaptive_rsi = avgLoss == 0 ? 100.0 : 100 - 100 / (1 + rs)
+
+// Plot the Adaptive RSI
+rsiPlot = plot(adaptive_rsi, color=#9E9E9E, linewidth=1, title='Adaptive RSI')
+
+// Define horizontal lines
+rsiUpperBand = hline(70, 'RSI Upper Band', color=#787B86)
+midline = hline(50, 'RSI Middle Band', color=color.new(#787B86, 50))
+rsiLowerBand = hline(30, 'RSI Lower Band', color=#787B86)
+
+// Fill background
+diffColor = color.rgb(158, 158, 158, 90)
+fill(rsiUpperBand, rsiLowerBand, color=diffColor, title='RSI Background Fill')
+
+// Overbought & Oversold fills
+midLinePlot = plot(50, color=na, editable=false, display=display.none)
+fill(rsiPlot, midLinePlot, 100, 70, top_color=color.new(color.green, 0), bottom_color=color.new(color.green, 100), title='Overbought Gradient Fill')
+fill(rsiPlot, midLinePlot, 30, 0, top_color=color.new(color.red, 100), bottom_color=color.new(color.red, 0), title='Oversold Gradient Fill')
