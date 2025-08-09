@@ -1,0 +1,67 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/ 
+// © victhoreb
+
+//@version=6
+indicator('Pearson Correlation Best MA [victhoreb]', 'Pearson Correlation Best MA', false)
+
+// ===== Settings =====
+
+// -- General Settings -- 
+corr_length = input.int(5, 'Correlation Length', minval = 5, inline = 'length')
+ma_length = input.int(15, 'MA Length', minval = 10, inline = 'length')
+
+smooth = input.bool(true, 'smooth MA', inline = 'ma')
+smooth_length = input.int(5, '', minval = 2, inline = 'ma')
+
+candle = input.bool(true, 'color candles', inline = 'col')
+bull_col = input.color(#00ff00, '+', inline = 'col')
+bear_col = input.color(#ff0000, '-', inline = 'col')
+
+sma_color = input.color(color.rgb(0, 0, 255), 'SMA', inline = '1', group = 'Appearence')
+ema_color = input.color(color.rgb(0, 128, 255), 'EMA', inline = '1', group = 'Appearence')
+dema_color = input.color(color.rgb(0, 255, 255), 'DEMA', inline = '2', group = 'Appearence')
+tema_color = input.color(color.rgb(0, 255, 128), 'TEMA', inline = '2', group = 'Appearence')
+lsma_color = input.color(color.rgb(128, 255, 0), 'LSMA', inline = '3', group = 'Appearence')
+rma_color = input.color(color.rgb(255, 255, 0), 'RMA', inline = '3', group = 'Appearence')
+wma_color = input.color(color.rgb(255, 128, 0), 'WMA', inline = '4', group = 'Appearence')
+vwma_color = input.color(color.rgb(255, 0, 0), 'VWMA', inline = '4', group = 'Appearence')
+
+ma_best(source, ma_length, corr_length) =>
+    sma = ta.sma(source, ma_length)
+    ema = ta.ema(source, ma_length)
+    dema = 2 * ta.ema(source, ma_length) - ta.ema(ta.ema(source, ma_length), ma_length)
+    tema = 3 * (ta.ema(source, ma_length) - ta.ema(ta.ema(source, ma_length), ma_length)) + ta.ema(ta.ema(ta.ema(source, ma_length), ma_length), ma_length)
+    lsma = ta.linreg(source, ma_length, 0)
+    rma = ta.rma(source, ma_length)
+    wma = ta.wma(source, ma_length)
+    vwma = ta.vwma(source, ma_length)
+
+    corr_sma = ta.correlation(sma, source, corr_length)
+    corr_ema = ta.correlation(ema, source, corr_length)
+    corr_dema = ta.correlation(dema, source, corr_length)
+    corr_tema = ta.correlation(tema, source, corr_length)
+    corr_lsma = ta.correlation(lsma, source, corr_length)
+    corr_rma = ta.correlation(rma, source, corr_length)
+    corr_wma = ta.correlation(wma, source, corr_length)
+    corr_vwma = ta.correlation(vwma, source, corr_length)
+    corr_max = math.max(corr_sma, corr_ema, corr_dema, corr_tema, corr_lsma, corr_rma, corr_wma, corr_vwma)
+
+    ma = corr_sma == corr_max ? sma : corr_ema == corr_max ? ema : corr_dema == corr_max ? dema : corr_tema == corr_max ? tema : corr_lsma == corr_max ? lsma : corr_rma == corr_max ? rma : corr_wma == corr_max ? wma : vwma
+    corr_max_color = corr_sma == corr_max ? sma_color : corr_ema == corr_max ? ema_color : corr_dema == corr_max ? dema_color : corr_tema == corr_max ? tema_color : corr_lsma == corr_max ? lsma_color : corr_rma == corr_max ? rma_color : corr_wma == corr_max ? wma_color : vwma_color 
+    
+    [ma, corr_max, corr_max_color]
+
+[ma, corr_max, corr_max_color] = ma_best(hl2, ma_length, corr_length)
+
+best_ma = smooth ? ta.rma(ta.linreg(ma, smooth_length, 0), smooth_length) : ma
+
+ma_color =  best_ma > best_ma[1] ? bull_col : bear_col
+plot(best_ma, 'Best MA', ma_color, 2, editable = false, force_overlay = true)
+
+plot(corr_max , 'Corr Max', corr_max_color, 2, editable = false)
+
+hline(1, editable = false) 
+hline(0, editable = false)
+hline(-1, editable = false)
+
+barcolor(candle ? ma_color : na, editable = false)

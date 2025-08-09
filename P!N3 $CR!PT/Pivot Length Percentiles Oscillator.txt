@@ -1,0 +1,182 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © dt440032
+
+//@version=5
+indicator("Pivot Length Percentiles Oscillator", overlay = false)
+
+pcnt = input(false, "View Distance Percentile ?")
+// === Inputs with Tooltips ===
+lft = input(15, "Left Bars", tooltip = "Number of bars to the left of the pivot point.")
+rht = input(15, "Right Bars", tooltip = "Number of bars to the right of the pivot point.")
+lw = input(85, "Low Percentile", tooltip = "Percentile value for calculating the lower boundary of pivot distances.")
+md = input(92.1, "Mid Percentile", tooltip = "Percentile value for calculating the median of pivot distances.")
+hi = input(99.1, "High Percentile", tooltip = "Percentile value for calculating the upper boundary of pivot distances.")
+
+stoch = ta.stoch(close, high, low, lft)
+
+// === Pivot Point Calculation ===
+// Calculate pivot highs and lows
+pihi = ta.pivothigh(lft, rht)
+pilo = ta.pivotlow(lft, rht)
+
+// === Arrays for Storing Pivot Data ===
+var float[] distances_high = array.new_float()  // Stores distances between pivot highs
+var float[] distances_low = array.new_float()   // Stores distances between pivot lows
+var int[] candle_counts_high = array.new_int()  // Stores candle counts between pivot highs
+var int[] candle_counts_low = array.new_int()   // Stores candle counts between pivot lows
+
+// Variables to track the last pivot
+var float last_pivot_high_price = na
+var float last_pivot_low_price = na
+var int last_pivot_high_bar = na
+var int last_pivot_low_bar = na
+var string last_pivot_type = na
+
+// === Update Arrays with Pivot Data ===
+if not na(pihi)
+    if not na(last_pivot_high_price)
+        // Calculate distance and candles between current and previous pivot highs
+        distance_high = math.abs(pihi - last_pivot_high_price)
+        candles_high = bar_index - last_pivot_high_bar
+        array.push(distances_high, distance_high)
+        array.push(candle_counts_high, candles_high)
+    // Update last pivot high details
+    last_pivot_high_price := pihi
+    last_pivot_high_bar := bar_index
+    last_pivot_type := "High"
+
+if not na(pilo)
+    if not na(last_pivot_low_price)
+        // Calculate distance and candles between current and previous pivot lows
+        distance_low = math.abs(pilo - last_pivot_low_price)
+        candles_low = bar_index - last_pivot_low_bar
+        array.push(distances_low, distance_low)
+        array.push(candle_counts_low, candles_low)
+    // Update last pivot low details
+    last_pivot_low_price := pilo
+    last_pivot_low_bar := bar_index
+    last_pivot_type := "Low"
+
+// === Current Distance from Last Pivots ===
+current_distance_high = not na(last_pivot_high_price) ? math.abs(close - last_pivot_high_price) : na
+current_distance_low = not na(last_pivot_low_price) ? math.abs(close - last_pivot_low_price) : na
+
+// === Percentile Calculation Function ===
+calculate_percentile(float[] arr, float percentile) =>
+    size = array.size(arr)
+    if size == 0
+        0.0  // Return 0 if array is empty
+    else
+        sorted = array.copy(arr)
+        array.sort(sorted)
+        index = (size - 1) * percentile / 100
+        lower_index = math.floor(index)
+        upper_index = math.ceil(index)
+        if lower_index == upper_index
+            array.get(sorted, int(index))
+        else
+            lower_value = array.get(sorted, lower_index)
+            upper_value = array.get(sorted, upper_index)
+            fraction = index - lower_index
+            lower_value + (upper_value - lower_value) * fraction
+
+// === Calculate Percentiles for Highs and Lows ===
+lw_distance_high = calculate_percentile(distances_high, lw)
+md_distance_high = calculate_percentile(distances_high, md)
+hi_distance_high = calculate_percentile(distances_high, hi)
+
+lw_distance_low = calculate_percentile(distances_low, lw)
+md_distance_low = calculate_percentile(distances_low, md)
+hi_distance_low = calculate_percentile(distances_low, hi)
+
+
+
+
+
+
+
+
+osc1 = low  - ta.highest(high, lft)
+osc2 = high - ta.lowest(low, lft)
+
+
+plot(pcnt == false ? osc1:na, color = color.green)
+plot(pcnt == false ? osc2:na, color = color.red)
+
+plot(pcnt == false ? (-lw_distance_low)*0.90:na, color = #00927a)
+plot(pcnt == false ? (-hi_distance_low)*0.90:na, color = #00927a)
+
+plot(pcnt == false ? lw_distance_high*0.90:na, color = color.rgb(155, 0, 0))
+plot(pcnt == false ? hi_distance_high*0.90:na, color = color.rgb(155, 0, 0))
+
+bull1 = ta.crossunder(osc1, (-lw_distance_low)*0.9) and (close < close[1]) and (close < open[1])
+bull2 = ta.crossunder(osc1, (-hi_distance_low)*0.9) and (close < close[1]) and (close < open[1])
+
+bear1 = ta.crossover(osc2, (lw_distance_high)*0.9) and (close > close[1]) and (close > open[1])
+bear2 = ta.crossover(osc2, (hi_distance_high)*0.9) and (close > close[1]) and (close > open[1])
+
+
+plotshape(pcnt == false ? bull1:na,location = location.belowbar, color = color.rgb(0, 255, 213), style = shape.labelup, force_overlay = true, text = "E", textcolor = color.black)
+plotshape(pcnt == false ? bear1:na,location = location.abovebar, color = color.rgb(155, 0, 0), style = shape.labeldown, force_overlay = true, text = "E", textcolor = color.black)
+
+plotshape(pcnt == false ? bull2:na,location = location.belowbar, color = color.rgb(0, 255, 213), style = shape.labelup, force_overlay = true, text = "E", textcolor = color.black)
+plotshape(pcnt == false ? bear2:na,location = location.abovebar, color = color.rgb(155, 0, 0), style = shape.labeldown, force_overlay = true, text = "E", textcolor = color.black)
+
+plot(0, color = color.silver)
+
+
+
+// Function to convert a distance value to its percentile in the distribution
+distance_to_percentile(float[] arr, float distance_value) =>
+    // Return 0 if array is empty
+    size = array.size(arr)
+    if size == 0
+        0.0
+    else
+        // Make a copy and sort the array
+        sorted = array.copy(arr)
+        array.sort(sorted)
+        
+        // If distance is smaller than minimum value
+        if distance_value < array.get(sorted, 0)
+            0.0
+        // If distance is larger than maximum value
+        else if distance_value > array.get(sorted, size - 1)
+            100.0
+        else
+            // Find position of the value in the sorted array
+            position = 0
+            for i = 0 to size - 1
+                if array.get(sorted, i) <= distance_value
+                    position := i
+            
+            // Calculate percentile 
+            percentile = position * 100.0 / (size - 1)
+            percentile
+
+// Example usage:
+// Assuming distances_high and distances_low are your existing arrays of distances
+// To find what percentile a specific distance represents:
+// For high pivots:
+my_distance_high = osc2  // Replace with your distance value
+high_percentile = distance_to_percentile(distances_high, my_distance_high)
+
+// For low pivots:
+my_distance_low = osc1 // Replace with your distance value
+low_percentile = distance_to_percentile(distances_low, math.abs(my_distance_low))
+
+// You can plot or use these percentiles
+plot(pcnt == true ? high_percentile:na, "High Distance Percentile", color.red)
+plot(pcnt == true ? -low_percentile:na, "Low Distance Percentile", color.green)
+// You can plot or use these percentiles
+plot(pcnt == true ? 90:na, "High Distance Percentile", color.rgb(255, 0, 0))
+plot(pcnt == true ? -90:na, "Low Distance Percentile", color.rgb(2, 197, 8))
+// You can plot or use these percentiles
+plot(pcnt == true ? 99:na, "High Distance Percentile", color.rgb(255, 0, 0))
+plot(pcnt == true ? -99:na, "Low Distance Percentile", color.rgb(2, 197, 8))
+
+// You can plot or use these percentiles
+plot(pcnt == true ? 50:na, "High Distance Percentile", color.rgb(255, 0, 0))
+plot(pcnt == true ? -50:na, "Low Distance Percentile", color.rgb(2, 197, 8))
+
+

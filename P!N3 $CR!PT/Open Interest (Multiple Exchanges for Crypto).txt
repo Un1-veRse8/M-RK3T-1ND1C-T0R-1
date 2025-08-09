@@ -1,0 +1,110 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © BentonBuilding
+//
+//@version=6
+indicator('Open Interest (Multiple Exchanges for Crypto)', 'OI', false, format.volume)
+//
+//
+//
+ex = input.string('Exchange 1', 'Data Source',     ['Exchange 1','Exchange 2','Exchange 3','Exchange 4','Exchange 5','ALL EXCHANGES'], group='PLOT')
+t  = input.string('USDT',       'USD and/or USDT', ['USDT','USD','USD+USDT'],                                                          group='PLOT')
+//
+ex1 = input.string('BINANCE',   'Exchange 1',                                                                                          group='Exchanges') + ':'
+ex2 = input.string('BITMEX',    'Exchange 2',                                                                                          group='Exchanges') + ':'
+ex3 = input.string('OKX',       'Exchange 3',                                                                                          group='Exchanges') + ':'
+ex4 = input.string('KRAKEN',    'Exchange 4',                                                                                          group='Exchanges') + ':'
+ex5 = input.string('BITGET',    'Exchange 5',                                                                                          group='Exchanges') + ':'
+//
+s_t = input.bool(false, 'Show Which Exchanges Have Data',                                                                              group='Table')
+//
+//
+//
+[oi_o1, oi_h1, oi_l1, oi_c1] = request.security( ex1+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o2, oi_h2, oi_l2, oi_c2] = request.security( ex1+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o3, oi_h3, oi_l3, oi_c3] = request.security( ex2+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o4, oi_h4, oi_l4, oi_c4] = request.security( ex2+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o5, oi_h5, oi_l5, oi_c5] = request.security( ex3+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o6, oi_h6, oi_l6, oi_c6] = request.security( ex3+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o7, oi_h7, oi_l7, oi_c7] = request.security( ex4+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o8, oi_h8, oi_l8, oi_c8] = request.security( ex4+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o9, oi_h9, oi_l9, oi_c9] = request.security( ex5+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+[oi_o0, oi_h0, oi_l0, oi_c0] = request.security( ex5+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', timeframe.period, [open, high, low, close], ignore_invalid_symbol = true)
+//
+t_ot = (nz(oi_o1,0) + nz(oi_o3,0) + nz(oi_o5,0) + nz(oi_o7,0) + nz(oi_o9,0)) / ((na(oi_o1)?0:1) + (na(oi_o3)?0:1) + (na(oi_o5)?0:1) + (na(oi_o7)?0:1) + (na(oi_o9)?0:1))
+t_od = (nz(oi_o2,0) + nz(oi_o4,0) + nz(oi_o6,0) + nz(oi_o8,0) + nz(oi_o0,0)) / ((na(oi_o2)?0:1) + (na(oi_o4)?0:1) + (na(oi_o6)?0:1) + (na(oi_o8)?0:1) + (na(oi_o0)?0:1))
+t_ht = (nz(oi_h1,0) + nz(oi_h3,0) + nz(oi_h5,0) + nz(oi_h7,0) + nz(oi_h9,0)) / ((na(oi_h1)?0:1) + (na(oi_h3)?0:1) + (na(oi_h5)?0:1) + (na(oi_h7)?0:1) + (na(oi_h9)?0:1))
+t_hd = (nz(oi_h2,0) + nz(oi_h4,0) + nz(oi_h6,0) + nz(oi_h8,0) + nz(oi_h0,0)) / ((na(oi_h2)?0:1) + (na(oi_h4)?0:1) + (na(oi_h6)?0:1) + (na(oi_h8)?0:1) + (na(oi_h0)?0:1))
+t_lt = (nz(oi_l1,0) + nz(oi_l3,0) + nz(oi_l5,0) + nz(oi_l7,0) + nz(oi_l9,0)) / ((na(oi_l1)?0:1) + (na(oi_l3)?0:1) + (na(oi_l5)?0:1) + (na(oi_l7)?0:1) + (na(oi_l9)?0:1))
+t_ld = (nz(oi_l2,0) + nz(oi_l4,0) + nz(oi_l6,0) + nz(oi_l8,0) + nz(oi_l0,0)) / ((na(oi_l2)?0:1) + (na(oi_l4)?0:1) + (na(oi_l6)?0:1) + (na(oi_l8)?0:1) + (na(oi_l0)?0:1))
+t_ct = (nz(oi_c1,0) + nz(oi_c3,0) + nz(oi_c5,0) + nz(oi_c7,0) + nz(oi_c9,0)) / ((na(oi_c1)?0:1) + (na(oi_c3)?0:1) + (na(oi_c5)?0:1) + (na(oi_c7)?0:1) + (na(oi_c9)?0:1))
+t_cd = (nz(oi_c2,0) + nz(oi_c4,0) + nz(oi_c6,0) + nz(oi_c8,0) + nz(oi_c0,0)) / ((na(oi_c2)?0:1) + (na(oi_c4)?0:1) + (na(oi_c6)?0:1) + (na(oi_c8)?0:1) + (na(oi_c0)?0:1)) 
+//
+//
+//
+o = switch ex
+    'Exchange 1'    => t=='USDT'?oi_o1:(t=='USD'?oi_o2:((nz(oi_o1,0)+nz(oi_o2,0))/((na(oi_o1)?0:1)+(na(oi_o2)?0:1))) )
+    'Exchange 2'    => t=='USDT'?oi_o3:(t=='USD'?oi_o4:((nz(oi_o3,0)+nz(oi_o4,0))/((na(oi_o3)?0:1)+(na(oi_o4)?0:1))) )
+    'Exchange 3'    => t=='USDT'?oi_o5:(t=='USD'?oi_o6:((nz(oi_o5,0)+nz(oi_o6,0))/((na(oi_o5)?0:1)+(na(oi_o6)?0:1))) )
+    'Exchange 4'    => t=='USDT'?oi_o7:(t=='USD'?oi_o8:((nz(oi_o7,0)+nz(oi_o8,0))/((na(oi_o7)?0:1)+(na(oi_o8)?0:1))) )
+    'Exchange 5'    => t=='USDT'?oi_o9:(t=='USD'?oi_o0:((nz(oi_o9,0)+nz(oi_o0,0))/((na(oi_o9)?0:1)+(na(oi_o0)?0:1))) )
+    'ALL EXCHANGES' => t=='USDT'?t_ot :(t=='USD'?t_od :math.avg(t_ot, t_od) )
+    //
+//
+h = switch ex
+    'Exchange 1'    => t=='USDT'?oi_h1:(t=='USD'?oi_h2:((nz(oi_h1,0)+nz(oi_h2,0))/((na(oi_h1)?0:1)+(na(oi_h2)?0:1))) )
+    'Exchange 2'    => t=='USDT'?oi_h3:(t=='USD'?oi_h4:((nz(oi_h3,0)+nz(oi_h4,0))/((na(oi_h3)?0:1)+(na(oi_h4)?0:1))) )
+    'Exchange 3'    => t=='USDT'?oi_h5:(t=='USD'?oi_h6:((nz(oi_h5,0)+nz(oi_h6,0))/((na(oi_h5)?0:1)+(na(oi_h6)?0:1))) )
+    'Exchange 4'    => t=='USDT'?oi_h7:(t=='USD'?oi_h8:((nz(oi_h7,0)+nz(oi_h8,0))/((na(oi_h7)?0:1)+(na(oi_h8)?0:1))) )
+    'Exchange 5'    => t=='USDT'?oi_h9:(t=='USD'?oi_h0:((nz(oi_h9,0)+nz(oi_h0,0))/((na(oi_h9)?0:1)+(na(oi_h0)?0:1))) )
+    'ALL EXCHANGES' => t=='USDT'?t_ht :(t=='USD'?t_hd :math.avg(t_ht, t_hd) )
+    //
+//
+l = switch ex
+    'Exchange 1'    => t=='USDT'?oi_l1:(t=='USD'?oi_l2:((nz(oi_l1,0)+nz(oi_l2,0))/((na(oi_l1)?0:1)+(na(oi_l2)?0:1))) )
+    'Exchange 2'    => t=='USDT'?oi_l3:(t=='USD'?oi_l4:((nz(oi_l3,0)+nz(oi_l4,0))/((na(oi_l3)?0:1)+(na(oi_l4)?0:1))) )
+    'Exchange 3'    => t=='USDT'?oi_l5:(t=='USD'?oi_l6:((nz(oi_l5,0)+nz(oi_l6,0))/((na(oi_l5)?0:1)+(na(oi_l6)?0:1))) )
+    'Exchange 4'    => t=='USDT'?oi_l7:(t=='USD'?oi_l8:((nz(oi_l7,0)+nz(oi_l8,0))/((na(oi_l7)?0:1)+(na(oi_l8)?0:1))) )
+    'Exchange 5'    => t=='USDT'?oi_l9:(t=='USD'?oi_l0:((nz(oi_l9,0)+nz(oi_l0,0))/((na(oi_l9)?0:1)+(na(oi_l0)?0:1))) )
+    'ALL EXCHANGES' => t=='USDT'?t_lt :(t=='USD'?t_ld :math.avg(t_lt, t_ld) )
+    //
+//
+c = switch ex
+    'Exchange 1'    => t=='USDT'?oi_c1:(t=='USD'?oi_c2:((nz(oi_c1,0)+nz(oi_c2,0))/((na(oi_c1)?0:1)+(na(oi_c2)?0:1))) )
+    'Exchange 2'    => t=='USDT'?oi_c3:(t=='USD'?oi_c4:((nz(oi_c3,0)+nz(oi_c4,0))/((na(oi_c3)?0:1)+(na(oi_c4)?0:1))) )
+    'Exchange 3'    => t=='USDT'?oi_c5:(t=='USD'?oi_c6:((nz(oi_c5,0)+nz(oi_c6,0))/((na(oi_c5)?0:1)+(na(oi_c6)?0:1))) )
+    'Exchange 4'    => t=='USDT'?oi_c7:(t=='USD'?oi_c8:((nz(oi_c7,0)+nz(oi_c8,0))/((na(oi_c7)?0:1)+(na(oi_c8)?0:1))) )
+    'Exchange 5'    => t=='USDT'?oi_c9:(t=='USD'?oi_c0:((nz(oi_c9,0)+nz(oi_c0,0))/((na(oi_c9)?0:1)+(na(oi_c0)?0:1))) )
+    'ALL EXCHANGES' => t=='USDT'?t_ct :(t=='USD'?t_cd :math.avg(t_ct, t_cd) )
+    //
+//
+plotcandle(o, h, l, c, 'Candle Plot', (c>o)?color.green:color.red, (c>o)?color.green:color.red, display=display.all)
+//
+if s_t
+    t1 = table.new(position.top_right, 2, 10, color.new(color.blue,75), color.white, 1, color.white, 1)
+    //
+    table.cell(t1, 0, 0, ex1+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 1, ex1+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 2, ex2+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 3, ex2+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 4, ex3+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 5, ex3+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 6, ex4+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 7, ex4+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 8, ex5+(str.contains(syminfo.ticker, 'USDT')?syminfo.ticker                            :str.replace(syminfo.ticker,'USD','USDT',0))+(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    table.cell(t1, 0, 9, ex5+(str.contains(syminfo.ticker, 'USDT')?str.replace(syminfo.ticker,'USDT','USD',0):syminfo.ticker)                            +(str.endswith(syminfo.ticker,'P')?'':'.P')+'_OI', 0, 0, color.white)
+    //
+    table.cell(t1, 1, 0, na(oi_c1)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 1, na(oi_c2)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 2, na(oi_c3)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 3, na(oi_c4)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 4, na(oi_c5)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 5, na(oi_c6)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 6, na(oi_c7)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 7, na(oi_c8)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 8, na(oi_c9)?'N':'Y', 0, 0, color.white)
+    table.cell(t1, 1, 9, na(oi_c0)?'N':'Y', 0, 0, color.white)
+    //
+//
+logo = table.new(position = position.bottom_right, columns = 2, rows = 1, bgcolor = color.new(color.white, 100), frame_color = color.new(color.white, 100), border_color = color.new(color.white, 100))
+table.cell_set_text_color(logo, 1, 0, color.purple)
+table.cell_set_text (logo, 1, 0, '𖢘')

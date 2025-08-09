@@ -1,0 +1,41 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © RWCS_LTD
+
+//@version=6
+indicator("Price Lag Factor (PLF)", overlay=false)
+
+// User Inputs
+longPeriod = input.int(50, "Long Period", group = "Z-Score Lengths")
+shortPeriod = input.int(14, "Short Period", group = "Z-Score Lengths")
+smoothing = input.int(3, "Smoothing Factor", group = "Hull Moving Average applied to Z-Score")
+
+ob_thresh = input.int(2, "Overbought Threshold", group = "Z-Score Signal Zones")
+os_thresh = input.int(-2, "Oversold Threshold", group = "Z-Score Signal Zones")
+
+// Z-Score Calculation Function
+fun_zscore(source, length) =>
+    mean = ta.sma(source, length)
+    std_dev = ta.stdev(source, length)
+    (source - mean)
+
+// Calculating Z-Scores for Long and Short Periods
+z_long = fun_zscore(close, longPeriod)
+z_short = fun_zscore(close, shortPeriod)
+
+// Price Lag Factor Calculation (Dynamic Scaling)
+plf_raw = z_long - z_short
+
+// Normalizing the PLF using standard deviation
+plf = plf_raw / ta.stdev(plf_raw, longPeriod)
+
+// Smoothing the PLF for better signal clarity
+plf_smooth = ta.hma(plf, smoothing)
+
+// Plotting the PLF as a Histogram
+colorG = plf_smooth >= 0 ? plf_smooth > plf_smooth[1] ? color.aqua : color.teal : plf_smooth < plf_smooth[1] ? color.fuchsia : color.purple
+plot(plf_smooth, style=plot.style_histogram, color=colorG, linewidth=2, title="Smoothed PLF")
+hline(0, "Zero Line", color=color.gray, linewidth=1)
+
+// Visualizing Extremes with Dashed Lines
+hline(ob_thresh, "Upper Extreme", color=color.aqua, linestyle=hline.style_dashed)
+hline(os_thresh, "Lower Extreme", color=color.fuchsia, linestyle=hline.style_dashed)

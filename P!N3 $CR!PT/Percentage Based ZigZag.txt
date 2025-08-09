@@ -1,0 +1,105 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © ChartPrime
+
+//@version=6
+
+indicator('Percentage Based ZigZag', overlay=true, max_lines_count=300, max_labels_count=300, max_bars_back=200)
+
+//#region INPUTS SECTION
+percentageMove = input.float(5.0, title="Percentage Move", step=0.5, minval=0, group="ZigZag Calculation", tooltip="Minimum percentage move required for a reversal")
+
+// Display toggle inputs
+showZigZagPrice = input.bool(true, title="Show ZigZag Price?", group="ZigZag Display", tooltip="Display the price at each ZigZag reversal point")
+showZigZagPercentageChange = input.bool(true, title="Show ZigZag Percentage Change?", group="ZigZag Display", tooltip="Display the percentage change between ZigZag points")
+showZigzagReversalInfo = input.bool(true, title="Show Trend Reversal Information?", group="ZigZag Display", tooltip="Display information about ZigZag reversal point")
+
+fontSize = input.string("Normal", title="Font Size", options=["Tiny", "Small", "Normal", "Large"], group="Label Settings")
+reversalLabelOffset = input.int(10, minval=0, step=5, title="Reversal Info Offset (bars)", group="Label Settings")
+
+// ============================================
+// Color Settings
+// ============================================
+changeBackgroundColor = input.bool(false, title="Change Background Color?", group="Visual Settings", tooltip="Toggle to change the chart background based on ZigZag signals")
+bullishColor = input.color(color.green, title="Bullish Color", group="Visual Settings", tooltip="Color to indicate bullish ZigZag conditions")
+bearishColor = input.color(color.red, title="Bearish Color", group="Visual Settings", tooltip="Color to indicate Bearish ZigZag conditions")
+//#endregion
+
+f_pctChange(prev, curr) => 100 * math.abs(curr - prev) / prev
+
+var int trend = 1
+var float HH = high
+var float LL = low
+var int HH_index = 0
+var int LL_index = 0
+
+string fontSizeMap = fontSize == "Tiny" ? size.tiny : fontSize == "Small" ? size.small : fontSize == "Normal" ? size.normal : fontSize == "Large" ? size.large : na
+
+// Calculate and display ZigZags
+if trend > 0
+    threshold = 1 - percentageMove * 0.01
+    if high >= HH
+        HH := high
+        HH_index := bar_index
+    else if low < HH * threshold
+        trend := -1
+        LL := low
+        LL_index := bar_index
+        pc = f_pctChange(LL[1], HH)
+
+        // Build a string of swing price and percentage change
+        _text = showZigZagPrice ? str.tostring(HH, format.mintick) : ""
+        _text += showZigZagPercentageChange ? "\n" + "+" + str.tostring(pc, format.percent) : ""
+        str.trim(_text)
+
+        label.new(HH_index[1], close, _text, yloc=yloc.abovebar, style=label.style_none, textcolor=color.green, size=fontSizeMap)
+        line.new(LL_index[1], LL[1], HH_index, HH, color=color.white)
+else
+    threshold = 1 + percentageMove * 0.01
+    if low <= LL
+        LL := low
+        LL_index := bar_index
+    else if high >= LL * threshold
+        trend := 1
+        HH := high
+        HH_index := bar_index
+        pc = f_pctChange(HH[1], LL)
+
+        // Build a string of swing price and percentage change
+        _text = showZigZagPrice ? str.tostring(LL, format.mintick) : ""
+        _text += showZigZagPercentageChange ? "\n" + "-" + str.tostring(pc, format.percent) : ""
+        str.trim(_text)
+
+        label.new(LL_index[1], close, _text, yloc=yloc.belowbar, style=label.style_none, textcolor=color.red, size=fontSizeMap)
+        line.new(HH_index[1], HH[1], LL_index, LL, color=color.white)
+
+
+// Display the final ZigZag line with its label and display Reversal details
+if barstate.islast
+    if trend > 0
+        pc = f_pctChange(LL[1], HH)
+        _label = label.new(HH_index[1], high, str.tostring(HH, format.mintick) + "\n+" + str.tostring(pc, format.percent), yloc=yloc.abovebar, style=label.style_none, textcolor=color.green, size=fontSizeMap)
+        _line  = line.new(LL_index[1], LL[1], HH_index, HH, color=color.white)
+        // Delete previous line and label to prevent duplications
+        label.delete(_label[1])
+        line.delete(_line[1])
+    else
+        pc = f_pctChange(HH[1], LL)
+        _label = label.new(LL_index[1], low, str.tostring(LL, format.mintick) + "\n-" + str.tostring(pc, format.percent), yloc=yloc.belowbar, style=label.style_none, textcolor=color.red, size=fontSizeMap)
+        _line  = line.new(HH_index[1], HH[1], LL_index, LL, color=color.white)
+        // Delete previous line and label to prevent duplications
+        label.delete(_label[1])
+        line.delete(_line[1])
+
+    // Display Reversal informations
+    if showZigzagReversalInfo
+        x_offset = bar_index+reversalLabelOffset
+        reversalPrice = trend > 0 ? HH * (1 - percentageMove / 100) : LL * (1 + percentageMove / 100)
+        _label = label.new(x_offset+10, reversalPrice, "Trend Reversal:\n" + str.tostring(reversalPrice, format.mintick) + " ("+str.tostring((trend>0?-1:1) * percentageMove)+"%)", style=label.style_none, textcolor=color.white, size=fontSizeMap)
+        _line = line.new(x_offset, reversalPrice, x_offset+20, reversalPrice, color=color.white)
+        // Delete previous line and label to prevent duplications 
+        label.delete(_label[1])
+        line.delete(_line[1])
+
+// Set the background color based on RSI Threshold crossover
+col = trend>0 ? bullishColor : bearishColor
+bgcolor(changeBackgroundColor?color.new(col, 90):na)

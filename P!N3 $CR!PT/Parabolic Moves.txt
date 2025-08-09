@@ -1,0 +1,204 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © mks17
+
+//@version=6
+indicator('Parabolic Moves', max_bars_back = 1700, precision = 4)
+
+parshif = input.int(0, title = 'Timeframe Adjustment')
+len = input(20, 'Signal Length')
+tpOverbought = input.float(0.7, 'TP Overbought Value Bull', step = 0.01) //"Entry Max Signal"
+tpOversold = input.float(-0.4, 'TP Oversold Value Bear', step = 0.01) //"Entry Max Signal"
+
+
+isParabolic(tmf) =>
+    upParabolic = 0
+    downParabolic = 0
+    // ma = sma(ohlc4, length * tmf)
+    // range = close - open[tmf - 1]
+
+    if close > close[1 * tmf] and close[1 * tmf] > close[2 * tmf] and close[2 * tmf] > close[3 * tmf] and close[3 * tmf] > close[4 * tmf] and close[4 * tmf] - close[2 * tmf] > close[2 * tmf] - close
+        upParabolic := 1
+
+    else if close < close[1 * tmf] and close[1 * tmf] < close[2 * tmf] and close[2 * tmf] < close[3 * tmf] and close[3 * tmf] < close[4 * tmf] and close[4 * tmf] - close[2 * tmf] < close[2 * tmf] - close
+        downParabolic := -1
+
+    Parabolic = upParabolic + downParabolic
+    Parabolic
+
+par1 = isParabolic(1)
+par2 = isParabolic(2)
+par3 = isParabolic(3)
+par4 = isParabolic(4)
+par6 = isParabolic(6)
+par8 = isParabolic(8)
+par10 = isParabolic(10)
+par12 = isParabolic(12) //1 Day
+par24 = isParabolic(24) //2 Days
+par36 = isParabolic(36) //4 Days
+par48 = isParabolic(48) //4 Days
+par60 = isParabolic(60) //7 Days
+par78 = isParabolic(78) //
+par96 = isParabolic(96) //10 Days
+par126 = isParabolic(126) //14 Days
+par156 = isParabolic(156) //
+par206 = isParabolic(206) //
+par252 = isParabolic(252) //21 Days
+par340 = isParabolic(340) //
+par408 = isParabolic(408) //28 Days
+
+f_hannWindow(simple int length, simple int shift, float minBase) =>
+    var shifts = shift
+    int ArrayLen = 2 * length - 1
+    _minBase = minBase / (math.abs(shifts) + 1)
+    var Array = array.new_float(ArrayLen, _minBase)
+    pi = math.pi
+    h = 0.0
+    c = 0
+    var leftside = 0
+    var rightside = 0
+    var coef = 0.0
+
+    if bar_index <= 0
+        for i = 0 to ArrayLen by 1
+            c := c + 1
+            h := (1 - math.cos(2 * pi * (c - 1) / ArrayLen)) / ArrayLen + _minBase
+            array.insert(Array, 0, h)
+
+    else if bar_index <= 1
+        if shifts > 0
+            for i = 0 to shifts - 1 by 1
+                array.shift(Array)
+                array.push(Array, 0.0)
+                shifts := shifts - 1
+                shifts
+        else if shifts < 0
+            for i = 0 to math.abs(shifts) - 1 by 1
+                array.unshift(Array, _minBase)
+                array.pop(Array)
+                shifts := shifts + 1
+                shifts
+        if length % 2 != 0
+            leftside := math.floor(length / 2)
+            rightside := ArrayLen - math.ceil(length / 2)
+            rightside
+        else
+            leftside := length / 2
+            rightside := ArrayLen - length / 2
+            rightside
+
+        for i = leftside to rightside by 1
+            coef := coef + array.get(Array, i)
+            coef
+        for i = leftside to rightside by 1
+            array.set(Array, i, array.get(Array, i) / coef)
+    Array
+
+var parArray = array.new_float(1, 0.0)
+parArray := f_hannWindow(20, parshif, 0.0)
+parabolic = array.get(parArray, 10) * par1 + array.get(parArray, 11) * par2 + array.get(parArray, 12) * par3 + array.get(parArray, 13) * par4 + array.get(parArray, 14) * par6 + array.get(parArray, 15) * par6 + array.get(parArray, 16) * par8 + array.get(parArray, 17) * par10 + array.get(parArray, 18) * par12 + array.get(parArray, 19) * par24 + array.get(parArray, 20) * par36 + array.get(parArray, 21) * par48 + array.get(parArray, 22) * par60 + array.get(parArray, 23) * par78 + array.get(parArray, 24) * par96 + array.get(parArray, 25) * par126 + array.get(parArray, 26) * par156 + array.get(parArray, 27) * par206 + array.get(parArray, 28) * par252 + array.get(parArray, 29) * par340 + array.get(parArray, 30) * par408 
+
+
+//Alerts
+if parabolic > tpOverbought
+    alert('Parabolic Moves Top Conditions '+ syminfo.ticker + '', alert.freq_once_per_bar_close)
+else if  parabolic < tpOversold
+    alert('Parabolic Moves Bottom Conditions '+ syminfo.ticker + '', alert.freq_once_per_bar_close)
+
+
+//Plots
+
+color_1 = color.new(color.red, 70)
+color_2 = color.new(color.green, 60)
+hline(0)
+hline(tpOversold)
+hline(tpOverbought)
+b_color = parabolic > tpOverbought ? color_1 : parabolic < tpOversold ? color_2 : na
+bgcolor(b_color)
+plot(parabolic, color = color.new(color.blue, 0), title = 'Grado de Avance Parabolico')
+plot(ta.sma(parabolic, len), color = color.new(color.orange, 0), title = 'Signal Grado de Avance Parabolico')
+
+// plot(par206, color=color.yellow)
+// plot(par252, color=color.yellow)
+// plot(par408, color=color.yellow)
+
+var upPar1 = 0
+if par1 == 1
+    upPar1 := upPar1 + 1
+    upPar1
+plot(100 * upPar1 / bar_index, title = '2h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar2 = 0
+if par2 == 1
+    upPar2 := upPar2 + 1
+    upPar2
+plot(100 * upPar2 / bar_index, title = '4h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar3 = 0
+if par3 == 1
+    upPar3 := upPar3 + 1
+    upPar3
+plot(100 * upPar3 / bar_index, title = '6h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar4 = 0
+if par4 == 1
+    upPar4 := upPar4 + 1
+    upPar4
+plot(100 * upPar4 / bar_index, title = '8h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+// var upPar5 = 0
+// if par5 == 1
+//     upPar5 := upPar5 + 1
+// plot(100*upPar5/bar_index, title="10h Parabolic moves", char="•", location=location.bottom, size=size.tiny, color=color.blue, transp=100)
+var upPar6 = 0
+if par6 == 1
+    upPar6 := upPar6 + 1
+    upPar6
+plot(100 * upPar6 / bar_index, title = '12h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+// var upPar7 = 0
+// if par7 == 1
+//     upPar7 := upPar7 + 1
+// plot(100*upPar7/bar_index, title="14h Parabolic moves", char="•", location=location.bottom, size=size.tiny, color=color.blue, transp=100)
+var upPar8 = 0
+if par8 == 1
+    upPar8 := upPar8 + 1
+    upPar8
+plot(100 * upPar8 / bar_index, title = '16h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+// var upPar9 = 0
+// if par9 == 1
+//     upPar9 := upPar9 + 1
+// plot(100*upPar9/bar_index, title="18h Parabolic moves", char="•", location=location.bottom, size=size.tiny, color=color.blue, transp=100)
+var upPar10 = 0
+if par10 == 1
+    upPar10 := upPar10 + 1
+    upPar10
+plot(100 * upPar10 / bar_index, title = '20h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+// var upPar11 = 0
+// if par11 == 1
+//     upPar11 := upPar11 + 1
+// plot(100*upPar11/bar_index, title="22h Parabolic moves", char="•", location=location.bottom, size=size.tiny, color=color.blue, transp=100)
+var upPar12 = 0
+if par12 == 1
+    upPar12 := upPar12 + 1
+    upPar12
+plot(100 * upPar12 / bar_index, title = '24h Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar24 = 0
+if par24 == 1
+    upPar24 := upPar24 + 1
+    upPar24
+plot(100 * upPar24 / bar_index, title = '2 D Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar48 = 0
+if par48 == 1
+    upPar48 := upPar48 + 1
+    upPar48
+plot(100 * upPar48 / bar_index, title = '4 D Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar84 = 0
+if par60 == 1
+    upPar84 := upPar84 + 1
+    upPar84
+plot(100 * upPar84 / bar_index, title = '7 D Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar168 = 0
+if par156 == 1
+    upPar168 := upPar168 + 1
+    upPar168
+plot(100 * upPar168 / bar_index, title = '14 D Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))
+var upPar408 = 0
+if par408 == 1
+    upPar408 := upPar408 + 1
+    upPar408
+plot(100 * upPar408 / bar_index, title = '21 D Parabolic moves', display=display.data_window, color = color.new(color.blue, 0))

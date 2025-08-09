@@ -1,0 +1,13 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © gunnjac
+
+//@version=6
+indicator(title = "Price-Weighted OBV", shorttitle = 'PW-OBV', overlay=false)
+
+scaler = input.int(100)
+pw_obv = 0.0
+
+price_change = scaler* (close - close[1]) / close[1]
+pw_obv := nz(pw_obv[1]) + price_change * volume
+
+plot(pw_obv, color=color.teal, title="PW-OBV")

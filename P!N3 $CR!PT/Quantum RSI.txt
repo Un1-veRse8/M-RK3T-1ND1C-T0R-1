@@ -1,0 +1,83 @@
+
+/// This indicator is created under TechnoBlooms - Innovating Trading Indicators and Strategies.
+// All rights reserved. Unauthorized copying or distribution is prohibited.
+// © TechnoBlooms
+//@version=6
+indicator("Quantum RSI (TechnoBlooms)", overlay=false)
+
+//-------------------------------------------------------------
+//Inputs
+//-------------------------------------------------------------
+length = input.int(14, minval=1, title="Quantum RSI Length")
+maLength = input.int(5, minval=1, title="RSI MA Length")
+maType = input.string("EMA", title="MA Type", options=["SMA", "EMA", "WMA", "SMMA (RMA)", "VWMA"])
+src = input.source(close, title="Source")
+
+//-------------------------------------------------------------
+//Gaussian Decay Function
+//-------------------------------------------------------------
+decay(n, len) =>
+    math.exp(-math.pow(n / len, 2))
+
+//-------------------------------------------------------------
+//Quantum RSI Calculation
+//-------------------------------------------------------------
+float g = 0.0
+float l = 0.0
+for i = 1 to length
+    diff = src[i - 1] - src[i]
+    weight = decay(i, length)
+    g += diff > 0 ? diff * weight : 0
+    l += diff < 0 ? -diff * weight : 0
+
+net_momentum = g - l
+total_energy = g + l
+wave_ratio = total_energy != 0 ? net_momentum / total_energy : 0
+qrsi = 50 + 50 * wave_ratio
+qrsi_smoothed = ta.ema(qrsi, 2)
+
+//-------------------------------------------------------------
+//Apply MA to RSI
+//-------------------------------------------------------------
+ma(source, length, MAtype) =>
+    switch MAtype
+        "SMA"       => ta.sma(source, length)
+        "EMA"       => ta.ema(source, length)
+        "WMA"       => ta.wma(source, length)
+        "SMMA (RMA)"=> ta.rma(source, length)
+        "VWMA"      => ta.vwma(source, length)
+
+qrsi_ma = ma(qrsi_smoothed, maLength, maType)
+
+//--------------------------------------------------------------
+//Plotting RSI and MA
+//--------------------------------------------------------------
+plotQR = plot(qrsi_smoothed, title="Quantum RSI", color=color.rgb(212, 12, 202, 11), linewidth=1)
+plotMA = plot(qrsi_ma, title="RSI MA", color=color.rgb(58, 255, 163), linewidth=1)
+
+//--------------------------------------------------------------
+//Define level lines using plots (for fill)
+//--------------------------------------------------------------
+plot30 = plot(30, title="Level 30", color=color.new(#32a736, 0), display=display.none)
+plot70 = plot(70, title="Level 70", color=color.new(#f33131, 0), display=display.none)
+
+//-------------------------------------------------------------
+//Conditional RSI plots for fill zones
+//-------------------------------------------------------------
+plotOver = plot(qrsi_smoothed > 70 ? qrsi_smoothed : na, title="Above 70", color=color.new(color.red, 100))
+plotUnder = plot(qrsi_smoothed < 30 ? qrsi_smoothed : na, title="Below 30", color=color.new(color.green, 100))
+plotMiddle = plot(qrsi_smoothed >= 30 and qrsi_smoothed <= 70 ? qrsi_smoothed : na, title="30–70 Zone", color=color.new(color.purple, 90))
+
+//-------------------------------------------------------------
+//Gradient Fills
+//-------------------------------------------------------------
+fill(plotOver, plot70, 100, 70, top_color = color.new(color.green, 0), bottom_color = color.new(color.green, 100),  title = "Overbought Gradient Fill")
+fill(plotUnder, plot30, 30,  0,  top_color = color.new(color.red, 100), bottom_color = color.new(#ec2929, 0),      title = "Oversold Gradient Fill")
+fill(plotMiddle, plotMiddle, color=color.new(color.purple, 85))
+
+//-------------------------------------------------------------
+//Static Threshold Lines
+//-------------------------------------------------------------
+hline(70, "Overbought", color=color.rgb(248, 24, 24, 11))
+hline(30, "Oversold", color=color.green)
+hline(50, "Midline", color=color.gray, linestyle=hline.style_dotted)

@@ -1,0 +1,125 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Polarity-VoVix Fusion Index (PVFI)", overlay=false, max_labels_count=500)
+
+// === INPUTS ===
+ofpi_len    = input.int(10, "OFPI Lookback Length", tooltip="Number of bars to calculate order flow pressure. Lower for fast signals, higher for smooth trends.")
+t3_len      = input.int(5, "OFPI T3 Smoothing Length", tooltip="Length for T3 smoothing of OFPI. Lower = faster, higher = smoother.")
+t3_vf       = input.float(0.7, "OFPI T3 Volume Factor (0.5-1.0)", minval=0.5, maxval=1.0, tooltip="T3 volume factor (0.5–1.0). Higher = more responsive, lower = smoother.")
+delta_len   = input.int(14, "VVD Delta Lookback", tooltip="Bars to calculate VVD (VoVix Volume Delta). Lower = more sensitive, higher = smoother.")
+vol_norm_len= input.int(20, "VVD Volatility Normalization Length", tooltip="Bars to normalize VVD by volume. Higher = more stable, lower = more reactive.")
+momentum_mem= input.int(3, "VVD Momentum Memory (bars)", tooltip="Bars for VVD memory boost. Higher = more persistence, lower = more reactive.")
+showDash      = input.bool(true, "Show Dashboard (Desktop)", group="Display", tooltip="Show/hide the full dashboard (best for desktop).")
+showInfoLabel = input.bool(false, "Show Compact Info Line (Mobile)", group="Display", tooltip="Show/hide a compact info label (best for mobile).")
+
+// === OFPI SECTION ===
+ofpi_body_pos   = (close - low) / (high - low + 1e-6)
+ofpi_buy_vol    = volume * ofpi_body_pos
+ofpi_sell_vol   = volume * (1 - ofpi_body_pos)
+ofpi_net_aggr   = ofpi_buy_vol - ofpi_sell_vol
+
+ofpi_rolling_sum(src, length) =>
+    var float sum = na
+    sum := na(sum[1]) ? 0 : sum[1]
+    sum += src
+    sum -= nz(src[length])
+    sum
+
+ofpi_raw    = ofpi_rolling_sum(ofpi_net_aggr, ofpi_len)
+ofpi_total  = ofpi_rolling_sum(volume, ofpi_len)
+ofpi        = ofpi_total != 0 ? ofpi_raw / ofpi_total : 0
+
+ofpi_t3(src, length, vfactor) =>
+    e1 = ta.ema(src, length)
+    e2 = ta.ema(e1, length)
+    e3 = ta.ema(e2, length)
+    e4 = ta.ema(e3, length)
+    e5 = ta.ema(e4, length)
+    e6 = ta.ema(e5, length)
+    c1 = -vfactor * vfactor * vfactor
+    c2 = 3 * vfactor * vfactor + 3 * vfactor * vfactor * vfactor
+    c3 = -6 * vfactor * vfactor - 3 * vfactor - 3 * vfactor * vfactor * vfactor
+    c4 = 1 + 3 * vfactor + vfactor * vfactor * vfactor + 3 * vfactor * vfactor
+    t3 = c1 * e6 + c2 * e5 + c3 * e4 + c4 * e3
+    t3
+
+ofpi_t3_val = ofpi_t3(ofpi, t3_len, t3_vf)
+
+// === VVD (VoVix Volume Delta) SECTION ===
+body_weight       = (close - open) / (high - low + 1e-6)
+weighted_vol      = volume * body_weight
+delta_ema         = ta.ema(weighted_vol, delta_len)
+vol_norm          = ta.ema(volume, vol_norm_len) + 1e-6
+delta_norm        = delta_ema / vol_norm
+mem_boost         = ta.ema(math.sign(weighted_vol), momentum_mem)
+
+// --- Soft Clamping with tanh for uniqueness ---
+tanh(x) =>
+    ex = math.exp(x)
+    exn = math.exp(-x)
+    (ex - exn) / (ex + exn)
+
+delta_final  = delta_norm * (1 + 0.5 * mem_boost)
+delta_scaled = tanh(delta_final)  // Range: -1 to 1, but preserves shape
+
+// --- Color Gradient for VVD ---
+delta_color = delta_scaled > 0 ? color.new(color.teal, math.round(100 - 100 * delta_scaled)) : 
+              delta_scaled < 0 ? color.new(color.purple, math.round(100 - 100 * math.abs(delta_scaled))) : 
+              color.gray
+
+// --- Shadow Effect for VVD (soft glow) ---
+vvd_shadow = color.new(color.aqua, 85)
+
+// === PLOTTING ===
+// VVD: Shadow area (soft glow)
+plot(delta_scaled, color=vvd_shadow, style=plot.style_area, linewidth=8, title="VVD Shadow")
+// VVD: Main area with gradient
+plot(delta_scaled, color=delta_color, style=plot.style_area, linewidth=2, title="Unique VoVix Volume Delta")
+// VVD: Line on top for clarity
+plot(delta_scaled, color=delta_scaled > 0 ? color.teal : delta_scaled < 0 ? color.purple : color.gray, linewidth=1, title="VVD Line")
+
+// OFPI: Neon line (glow + main)
+ofpi_core    = color.new(color.green, 0)
+ofpi_glow    = color.new(color.teal, 80)
+plot(ofpi_t3_val, color=ofpi_glow, linewidth=7, title="OFPI Neon Glow")
+plot(ofpi_t3_val, color=ofpi_core, linewidth=2, title="OFPI Neon Core")
+
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+
+// === Persistent variables for dashboard and info label ===
+var table dash = na
+var label mobLabel = na
+
+// === DASHBOARD ===
+if showDash
+    if barstate.islast
+        if na(dash)
+            dash := table.new(position.middle_right, 1, 6, bgcolor=color.new(color.black, 85), border_color=color.new(color.gray, 80), border_width=1)
+        table.clear(dash, 0, 0)
+        table.cell(dash, 0, 0, "PVFI  —  Polarity-VoVix Fusion Index", text_color=color.rgb(255, 255, 255, 50), bgcolor=color.new(color.black, 90), text_size=size.small)
+        table.cell(dash, 0, 1, "OFPI: " + str.tostring(ofpi_t3_val, "#.###") + "  " + (ofpi_t3_val > 0 ? "↑" : ofpi_t3_val < 0 ? "↓" : "•"), text_color=ofpi_core, text_size=size.small)
+        table.cell(dash, 0, 2, "VVD: " + str.tostring(delta_scaled, "#.###") + "  " + (delta_scaled > 0 ? "↑" : delta_scaled < 0 ? "↓" : "•"), text_color=delta_scaled > 0 ? color.teal : delta_scaled < 0 ? color.purple : color.gray, text_size=size.small)
+        table.cell(dash, 0, 3, "OFPI Dir: " + (ofpi_t3_val > 0 ? "Bullish" : ofpi_t3_val < 0 ? "Bearish" : "Neutral"), text_color=ofpi_core, text_size=size.small)
+        table.cell(dash, 0, 4, "VVD Dir: " + (delta_scaled > 0 ? "Bullish" : delta_scaled < 0 ? "Bearish" : "Neutral"), text_color=delta_scaled > 0 ? color.teal : delta_scaled < 0 ? color.purple : color.gray, text_size=size.small)
+        table.cell(dash, 0, 5, "⚡(DAFE) Trading Systems", text_color=color.rgb(255, 255, 255, 50), text_size=size.small, bgcolor=color.new(color.black, 90))
+else
+    if not na(dash)
+        table.clear(dash, 0, 0)
+
+// === MOBILE/COMPACT INFO LABEL (TOP RIGHT) ===
+if showInfoLabel
+    ofpi_arrow = ofpi_t3_val > 0 ? "↑" : ofpi_t3_val < 0 ? "↓" : "•"
+    vvd_arrow  = delta_scaled > 0 ? "↑" : delta_scaled < 0 ? "↓" : "•"
+    labelText = "OFPI: " + str.tostring(ofpi_t3_val, "#.##") + " " + ofpi_arrow + " | VVD: " + str.tostring(delta_scaled, "#.##") + " " + vvd_arrow
+    if na(mobLabel)
+        mobLabel := label.new(bar_index, na, labelText, xloc.bar_index, yloc.price, color.new(color.black, 80), label.style_label_left, color.white, size.small)
+    label.set_xy(mobLabel, bar_index, na)
+    label.set_text(mobLabel, labelText)
+    label.set_textcolor(mobLabel, color.green)
+    label.set_style(mobLabel, label.style_label_left)
+else
+    if not na(mobLabel)
+        label.delete(mobLabel)
+        mobLabel := na
