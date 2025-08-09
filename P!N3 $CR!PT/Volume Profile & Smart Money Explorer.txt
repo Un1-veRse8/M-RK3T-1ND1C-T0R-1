@@ -1,0 +1,116 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © sebamarghella
+
+
+//@version=5
+indicator("Volume Profile & Smart Money Explorer", overlay=false)
+
+// Input parameters
+i_lookback = input.int(30, "Lookback Period (Days)", minval=1, maxval=180)
+i_threshold = input.float(1.5, "Volume Threshold (x Average)", minval=1.0, maxval=5.0)
+i_smoothing = input.int(3, "Smoothing Period", minval=1, maxval=10)
+
+// Function to normalize volume
+f_normalizeVolume(vol) =>
+    var float avgVol = 0.0
+    avgVol := na(avgVol[1]) ? vol : (avgVol[1] * (i_lookback - 1) + vol) / i_lookback
+    vol / avgVol
+
+// Initialize arrays for hourly data
+var float[] hourlyVolume = array.new_float(24, 0.0)
+var float[] hourlyUpVolume = array.new_float(24, 0.0)
+var float[] hourlyDownVolume = array.new_float(24, 0.0)
+var float[] institutionalVolume = array.new_float(24, 0.0)
+var int[] hourlyCounts = array.new_int(24, 0)
+
+// Get current hour and normalize volume
+currentHour = hour(time)
+normalizedVolume = f_normalizeVolume(volume)
+isUpMove = close > open
+isInstitutional = normalizedVolume >= i_threshold
+
+// Update hourly volumes
+if not na(volume)
+    // Update total volume
+    array.set(hourlyVolume, currentHour, array.get(hourlyVolume, currentHour) + normalizedVolume)
+    
+    // Update directional volume
+    if isUpMove
+        array.set(hourlyUpVolume, currentHour, array.get(hourlyUpVolume, currentHour) + normalizedVolume)
+    else
+        array.set(hourlyDownVolume, currentHour, array.get(hourlyDownVolume, currentHour) + normalizedVolume)
+    
+    // Update institutional volume
+    if isInstitutional
+        array.set(institutionalVolume, currentHour, array.get(institutionalVolume, currentHour) + normalizedVolume)
+    
+    array.set(hourlyCounts, currentHour, array.get(hourlyCounts, currentHour) + 1)
+
+// Calculate averages and create plots
+var float[] avgVolume = array.new_float(24, 0.0)
+var float[] avgUpVolume = array.new_float(24, 0.0)
+var float[] avgDownVolume = array.new_float(24, 0.0)
+var float[] avgInstitutional = array.new_float(24, 0.0)
+
+if barstate.islast
+    // Calculate averages
+    for i = 0 to 23
+        counts = math.max(array.get(hourlyCounts, i), 1)
+        array.set(avgVolume, i, array.get(hourlyVolume, i) / counts)
+        array.set(avgUpVolume, i, array.get(hourlyUpVolume, i) / counts)
+        array.set(avgDownVolume, i, array.get(hourlyDownVolume, i) / counts)
+        array.set(avgInstitutional, i, array.get(institutionalVolume, i) / counts)
+
+// Plot the data
+plot(array.get(avgVolume, currentHour), "Total Volume", color=color.blue, style=plot.style_columns)
+plot(array.get(avgUpVolume, currentHour), "Up Volume", color=color.green, style=plot.style_columns)
+plot(array.get(avgDownVolume, currentHour), "Down Volume", color=color.red, style=plot.style_columns)
+plot(array.get(avgInstitutional, currentHour), "Institutional Volume", color=color.purple, style=plot.style_columns)
+
+// Create detailed table
+var table volumeTable = table.new(position.top_right, 6, 25, border_width=1)
+
+if barstate.islast
+    // Header row
+    table.cell(volumeTable, 0, 0, "Hour", bgcolor=color.gray, text_color=color.white)
+    table.cell(volumeTable, 1, 0, "Total Vol", bgcolor=color.gray, text_color=color.white)
+    table.cell(volumeTable, 2, 0, "Up Vol", bgcolor=color.gray, text_color=color.white)
+    table.cell(volumeTable, 3, 0, "Down Vol", bgcolor=color.gray, text_color=color.white)
+    table.cell(volumeTable, 4, 0, "Inst Vol", bgcolor=color.gray, text_color=color.white)
+    table.cell(volumeTable, 5, 0, "Samples", bgcolor=color.gray, text_color=color.white)
+
+    // Find maximum values for highlighting
+    float maxVol = array.max(avgVolume)
+    float maxInst = array.max(avgInstitutional)
+
+    // Data rows
+    for i = 0 to 23
+        volValue = array.get(avgVolume, i)
+        upValue = array.get(avgUpVolume, i)
+        downValue = array.get(avgDownVolume, i)
+        instValue = array.get(avgInstitutional, i)
+        counts = array.get(hourlyCounts, i)
+
+        bgcolor = volValue == maxVol ? color.new(color.green, 50) : color.new(color.gray, 70)
+        
+        table.cell(volumeTable, 0, i + 1, str.tostring(i) + ":00", bgcolor=bgcolor, text_color=color.white)
+        table.cell(volumeTable, 1, i + 1, str.tostring(volValue, "#.00"), bgcolor=bgcolor, text_color=color.white)
+        table.cell(volumeTable, 2, i + 1, str.tostring(upValue, "#.00"), 
+                  bgcolor=upValue > downValue ? color.new(color.green, 70) : bgcolor, text_color=color.white)
+        table.cell(volumeTable, 3, i + 1, str.tostring(downValue, "#.00"), 
+                  bgcolor=downValue > upValue ? color.new(color.red, 70) : bgcolor, text_color=color.white)
+        table.cell(volumeTable, 4, i + 1, str.tostring(instValue, "#.00"), 
+                  bgcolor=instValue == maxInst ? color.new(color.purple, 50) : bgcolor, text_color=color.white)
+        table.cell(volumeTable, 5, i + 1, str.tostring(counts), bgcolor=bgcolor, text_color=color.white)
+
+// Add summary label
+if barstate.islast
+    label.new(bar_index, 0, 
+             "Highest Volume Hour: " + str.tostring(array.indexof(avgVolume, array.max(avgVolume))) + ":00\n" +
+             "Strongest Institutional Hour: " + str.tostring(array.indexof(avgInstitutional, array.max(avgInstitutional))) + ":00", 
+             style=label.style_label_left,
+             color=color.navy,
+             textcolor=color.white)
+
+// Plot zero line for reference
+hline(0, "Zero Line", color=color.gray)

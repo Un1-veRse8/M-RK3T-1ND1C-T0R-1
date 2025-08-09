@@ -1,0 +1,67 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © vsov
+//@version=6
+indicator("Volume Weighted Median Price (VWMP)", shorttitle="VWMP", overlay=true, precision=2)
+
+// --- Inputs ---
+length = input.int(20, title="Lookback Period", minval=1)
+priceSource = input.source(hlc3, title="Price Source") // hlc3 is a common choice, others like close or hl2 can be used
+
+// --- Custom Type for Price-Volume Pair ---
+type PriceVolumePair
+    float price
+    float volume
+
+// --- VWMP Calculation Function ---
+calculateVWMP(src, vol, len) =>
+    // Create an array to store price-volume pairs for the lookback period
+    priceVolumeArray = array.new<PriceVolumePair>(0)
+    totalVolume = 0.0
+
+    // Populate the array and calculate total volume
+    for i = 0 to len - 1
+        _price = src[i]
+        _volume = vol[i]
+        // Ensure data is valid and volume is positive
+        if not na(_price) and not na(_volume) and _volume > 0
+            array.push(priceVolumeArray, PriceVolumePair.new(_price, _volume))
+            totalVolume += _volume
+
+    arraySize = array.size(priceVolumeArray)
+
+    // Handle cases with no valid data or zero total volume
+    if arraySize == 0 or totalVolume <= 0
+        na // Return 'not available'
+
+    // --- Manual Sorting (Bubble Sort by Price) ---
+    if arraySize > 1 // Only need to sort if there's more than one element
+        for i = 0 to arraySize - 2
+            for j = 0 to arraySize - i - 2
+                pair1 = array.get(priceVolumeArray, j)
+                pair2 = array.get(priceVolumeArray, j + 1)
+                if pair1.price > pair2.price
+                    // Swap elements
+                    array.set(priceVolumeArray, j, pair2)
+                    array.set(priceVolumeArray, j + 1, pair1)
+    // --- End of Sorting ---
+
+    // Find the median price level
+    medianVolumeTarget = totalVolume * 0.5
+    cumulativeVolume = 0.0
+    float vwmp = na // Initialize VWMP result
+
+    // Iterate through the sorted array
+    for idx = 0 to arraySize - 1
+        pair = array.get(priceVolumeArray, idx) // Get pair by index
+        cumulativeVolume += pair.volume
+        // When cumulative volume reaches or exceeds 50% of total volume, that price is the VWMP
+        if cumulativeVolume >= medianVolumeTarget
+            vwmp := pair.price
+            break // Exit loop once VWMP is found
+
+    vwmp // Return the calculated VWMP
+
+// --- Calculate and Plot ---
+vwmpValue = calculateVWMP(priceSource, volume, length)
+
+plot(vwmpValue, title="VWMP", color=color.new(color.orange, 0), linewidth=2)

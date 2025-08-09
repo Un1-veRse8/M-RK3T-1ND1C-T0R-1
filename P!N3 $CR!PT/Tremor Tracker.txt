@@ -1,0 +1,42 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TheUltimator5
+
+//@version=6
+indicator("Tremor Tracker [theUltimator5]", overlay=false)
+
+lowLimit = input.float(1.0, title="Low Volatility Limit")
+highLimit = input.float(2.0, title="High Volatility Limit")
+volLength = input.int(20, minval=1, title="Volatility MA Length")
+avgVolLookback = input.int(200, minval=10, title="Average Volatility Lookback")
+maType      = input.string("SMA", title="MA Type", options=["SMA", "EMA", "WMA"])
+showVolMA   = input.bool(true, title="Show Volatility MA Line?")
+showRawVol  = input.bool(true, title="Show Raw Volatility Bars?")
+
+// === Volatility Calculation (in percent) ===
+volatility = ((high / low) - 1) * 100
+
+// === Moving Average of Volatility ===
+volMA = switch maType
+    "EMA" => ta.ema(volatility, volLength)
+    "WMA" => ta.wma(volatility, volLength)
+    => ta.sma(volatility, volLength)
+
+// === Average Volatility over Lookback Window ===
+avgVol = ta.sma(volatility, avgVolLookback)
+
+// === Dynamic Coloring Based on Current vs Average Volatility ===
+// If current volatility is:
+// - < 100% of average -> lime
+// - between 100% and 150% of average -> yellow
+// - > 150% of average -> fuchsia
+
+volRatio = volatility / avgVol
+
+volColor = volRatio < lowLimit    ? color.lime :
+           volRatio < highLimit    ? color.yellow :
+           color.fuchsia
+
+// === Plotting ===
+plot(showVolMA ? volMA : na, title="Vol MA", color=color.blue, linewidth=1)
+plot(showRawVol ? volatility : na,title="Vol", color = volColor, linewidth = 1)
+hline(0, "Baseline (0)", color=color.gray, linestyle=hline.style_dashed)

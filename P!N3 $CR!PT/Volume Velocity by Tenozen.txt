@@ -1,0 +1,162 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Tenozen
+
+//@version=6
+indicator("Volume Velocity by Tenozen", overlay=false)
+
+timeframe = input.timeframe("240", "Anchored Timeframe", group = "Timeframe Settings")
+
+src = volume
+delta_t = input.int(1, "Time Delta Length", minval=1, group = "Inputs")
+sigma_a = input.float(0.1, "Sigma", minval=0, group = "Inputs")
+R_val = input.float(1, "R Value", minval=0, group = "Inputs")
+depth = input.int(1, "Derivatve", minval=1, maxval=4, group = "Inputs")
+
+//Initialize Variables
+kalman_matrix(src, delta_t, sigma_a, R_val) =>
+
+    //Matrix Initialize
+    var X_t = matrix.new<float>(1, 2) // [   xt   ] volume state
+                                  // [ xdot_t ] velocity state
+
+    var P_t = matrix.new<float>(2, 2) // uncertainty (Coveriance)
+
+    var phi = matrix.new<float>(2, 2) // state transition matrix (for prediction)
+
+    var H = matrix.new<float>(1, 2) // measurment matrix (observe volume only)
+
+    var Q = matrix.new<float>(2, 2) // process noise covariance
+
+    var R = matrix.new<float>(1, 1) // measurment noise covariance
+
+    var X_t_pred = matrix.new<float>(1, 2) // predict state
+
+    //Calculation
+
+    var X_t_pred_T = matrix.new<float>(2, 1)
+
+    var phi_T = matrix.new<float>(2, 2)
+
+    var temp1 = matrix.new<float>(2, 2)
+
+    var temp2 = matrix.new<float>(2, 2)
+
+    var HX_pred = matrix.new<float>(1, 1)
+
+    var H_T = matrix.new<float>(2, 1)
+
+    var K = matrix.new<float>(2, 1)
+
+    var I = matrix.new<float>(2, 2)
+
+    var temp7 = matrix.new<float>(2, 2)
+
+    var bool initialized = false
+
+    if barstate.isfirst and not initialized
+        initialized := true
+        //X_t Matrix
+        matrix.set(X_t, 0, 0, src)
+        matrix.set(X_t, 0, 1, 0)
+        //P_t Matrix
+        matrix.set(P_t, 0, 0, 1)
+        matrix.set(P_t, 0, 1, 0)
+        matrix.set(P_t, 1, 0, 0)
+        matrix.set(P_t, 1, 1, 1)
+        //phi Matrix
+        matrix.set(phi, 0, 0, 1)
+        matrix.set(phi, 0, 1, delta_t)
+        matrix.set(phi, 1, 0, 0)
+        matrix.set(phi, 1, 1, 1)
+        // H Matrix
+        matrix.set(H, 0, 0, 1)
+        matrix.set(H, 0, 1, 0)
+        // Q Matrix
+        matrix.set(Q, 0, 0, 0.25 * math.pow(delta_t, 4) * math.pow(sigma_a, 2))
+        matrix.set(Q, 0, 1, 0.5 * math.pow(delta_t, 3) * math.pow(sigma_a, 2))
+        matrix.set(Q, 1, 0, 0.5 * math.pow(delta_t, 3) * math.pow(sigma_a, 2))
+        matrix.set(Q, 1, 1, math.pow(delta_t, 2) * math.pow(sigma_a, 2))
+        // R Matrix
+        matrix.set(R, 0, 0, R_val)
+        //Kalman Velocity & Filter
+        float kalman_velocity = matrix.get(X_t, 0, 1)
+        float kalman_filter = matrix.get(X_t, 0, 0)
+
+        [kalman_velocity, kalman_filter]
+
+    else if initialized
+        // Predict State Formating
+        matrix.set(X_t_pred, 0, 0, matrix.get(X_t, 0, 0) + delta_t * matrix.get(X_t, 0, 1))
+        matrix.set(X_t_pred, 0, 1, matrix.get(X_t, 0, 1))  // Velocity unchanged
+        // Transpose of phi
+        matrix.set(phi_T, 0, 0, matrix.get(phi, 0, 0))
+        matrix.set(phi_T, 0, 1, matrix.get(phi, 1, 0))
+        matrix.set(phi_T, 1, 0, matrix.get(phi, 0, 1))
+        matrix.set(phi_T, 1, 1, matrix.get(phi, 1, 1))
+        // phi * P_t
+        temp1 := matrix.mult(phi, P_t)
+        // (phi * P_t) * phi^T
+        temp2 := matrix.mult(temp1, phi_T)
+        // P_t = predicted covariance = temp2 + Q
+        P_t := matrix.sum(temp2, Q)
+        // Calculate H * X_t_pred (predicted measurement)
+        matrix.set(X_t_pred_T, 0, 0, matrix.get(X_t_pred, 0, 0))
+        matrix.set(X_t_pred_T, 1, 0, matrix.get(X_t_pred, 0, 1))
+        HX_pred := matrix.mult(H, X_t_pred_T)
+        // Calculate residual y_t = z_t - H * X_t_pred
+        float y_t = src - matrix.get(HX_pred, 0, 0)
+        // Transpose of H
+        matrix.set(H_T, 0, 0, matrix.get(H, 0, 0))
+        matrix.set(H_T, 1, 0, matrix.get(H, 0, 1))
+        // Calculate S = H * P_t * H_T + R
+        var temp3 = matrix.mult(H, P_t)        // 1x2 * 2x2 = 1x2
+        var temp4 = matrix.mult(temp3, H_T)    // 1x2 * 2x1 = 1x1
+        var S = matrix.sum(temp4, R)            // 1x1 + 1x1
+        // Inverse of S (since it's 1x1, just reciprocal)
+        float S_inv = 1 / matrix.get(S, 0, 0)
+        // Kalman Gain K = P_t * H_T * S_inv (2x2 * 2x1 = 2x1)
+        var temp5 = matrix.mult(P_t, H_T)
+        matrix.set(K, 0, 0, matrix.get(temp5, 0, 0) * S_inv)
+        matrix.set(K, 1, 0, matrix.get(temp5, 1, 0) * S_inv)
+        // Update state: X_t = X_t_pred + K * y_t (1x2 + 1x2)
+        for i = 0 to 1
+            matrix.set(X_t, 0, i, matrix.get(X_t_pred, 0, i) + matrix.get(K, i, 0) * y_t)
+        // Update covariance: P_t = (I - K * H) * P_t
+        matrix.set(I, 0, 0, 1)
+        matrix.set(I, 0, 1, 0)
+        matrix.set(I, 1, 0, 0)
+        matrix.set(I, 1, 1, 1)
+
+        // Compute K * H (2x1 * 1x2 = 2x2)
+        var temp6 = matrix.mult(K, H)
+
+        // Compute I - K * H
+        for r = 0 to 1
+            for c = 0 to 1
+                matrix.set(temp7, r, c, matrix.get(I, r, c) - matrix.get(temp6, r, c))
+
+        // Update P_t
+        P_t := matrix.mult(temp7, P_t)
+
+        //Kalman Velocity & Filter
+        float kalman_velocity = matrix.get(X_t, 0, 1)
+        float kalman_filter = matrix.get(X_t, 0, 0)
+
+        [kalman_velocity, kalman_filter]
+
+[kv, kf] = kalman_matrix(src, delta_t, sigma_a, R_val)
+
+//Cumulative KV
+is_new_period = bool(ta.change(time(timeframe)))
+
+var float cum_kv = 0
+
+if is_new_period
+    cum_kv := kv
+else
+    cum_kv += kv
+
+// Plot the volume velocity
+plot(cum_kv, title="Kalman Velocity", color=color.rgb(0, 255, 55), linewidth=1)
+hline(0, "Zero Line", color=color.rgb(255, 0, 0), linestyle = hline.style_dotted, linewidth=2)
+bgcolor(is_new_period? color.new(color.blue, 85): na)

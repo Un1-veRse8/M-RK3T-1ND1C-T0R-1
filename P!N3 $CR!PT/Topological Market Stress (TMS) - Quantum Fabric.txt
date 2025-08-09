@@ -1,0 +1,277 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Topological Market Stress (TMS) - Quantum Fabric", overlay=false)
+
+// ========================================
+// INPUTS
+// ========================================
+group_topology = "🕳️ Topological Parameters"
+lookback = input.int(50, "Analysis Window", minval=20, maxval=200, group=group_topology, tooltip="Period for topological analysis.\n\n• 20-30: High-frequency scalping\n• 50: Balanced (recommended)\n• 100-200: Long-term position trading\n\nLonger windows = more stable but slower signals")
+hole_threshold = input.float(0.3, "Hole Formation Threshold", minval=0.1, maxval=0.9, step=0.1, group=group_topology, tooltip="Sensitivity for detecting topological holes.\n\n• 0.1-0.2: Very sensitive (more holes detected)\n• 0.3: Balanced (recommended)\n• 0.5-0.9: Conservative (fewer holes)\n\nHoles represent market structure breaks")
+density_radius = input.float(0.5, "Density Calculation Radius", minval=0.1, maxval=2.0, step=0.1, group=group_topology, tooltip="Radius for local density estimation.\n\n• 0.1-0.3: Fine-grained analysis\n• 0.5: Standard (recommended)\n• 1.0-2.0: Broad analysis\n\nSmaller radius = more sensitive to local changes")
+collapse_sensitivity = input.float(0.7, "Collapse Detection", minval=0.5, maxval=0.95, step=0.05, group=group_topology, tooltip="Threshold for detecting hole collapse events.\n\n• 0.5-0.6: Very sensitive\n• 0.7: Balanced (recommended)\n• 0.8-0.95: Conservative\n\nCollapse = sudden topology change (regime shift)")
+
+group_multiscale = "📊 Multi-Scale Analysis"
+enable_multiscale = input.bool(true, "Enable Multi-Scale", group=group_multiscale, tooltip="Analyze topology across multiple timeframes.\n\nProvides deeper insight into market structure at different scales")
+micro_scale = input.int(5, "Micro Scale Period", minval=3, maxval=15, group=group_multiscale, tooltip="Fast scale for immediate topology changes.\n\n• 3-5: Ultra-fast (tick/minute data)\n• 5-8: Fast (5m-15m charts)\n• 10-15: Medium-fast (30m-1H charts)")
+meso_scale = input.int(20, "Meso Scale Period", minval=10, maxval=50, group=group_multiscale, tooltip="Medium scale for trend topology.\n\n• 10-15: Short trends\n• 20-25: Medium trends (recommended)\n• 30-50: Long trends")
+macro_scale = input.int(100, "Macro Scale Period", minval=50, maxval=200, group=group_multiscale, tooltip="Slow scale for structural topology.\n\n• 50-75: Medium-term structure\n• 100: Long-term structure (recommended)\n• 150-200: Very long-term structure")
+
+group_processing = "⚙️ Signal Processing"
+smoothing_method = input.string("EMA", "Smoothing Method", options=["SMA", "EMA", "RMA", "WMA"], group=group_processing, tooltip="Method for smoothing stress signals.\n\n• SMA: Simple average (stable)\n• EMA: Exponential (responsive, recommended)\n• RMA: Running (very smooth)\n• WMA: Weighted (balanced)")
+smoothing_period = input.int(3, "Smoothing Period", minval=1, maxval=10, group=group_processing, tooltip="Period for signal smoothing.\n\n• 1-2: Minimal smoothing (noisy but fast)\n• 3-5: Balanced (recommended)\n• 6-10: Heavy smoothing (slow but stable)")
+normalization = input.string("Adaptive", "Normalization", options=["Fixed", "Adaptive", "Rolling"], group=group_processing, tooltip="Method for normalizing stress values.\n\n• Fixed: Static 0-1 range\n• Adaptive: Dynamic range (recommended)\n• Rolling: Rolling window normalization")
+
+group_visual = "🎨 Quantum Visualization"
+fabric_style = input.string("Quantum Field", "Fabric Style", options=["Quantum Field", "Topological Mesh", "Phase Space", "Minimal"], group=group_visual, tooltip="Visual representation of market topology.\n\n• Quantum Field: Flowing energy visualization\n• Topological Mesh: Mathematical topology\n• Phase Space: Dynamical systems view\n• Minimal: Clean, simple display")
+color_scheme = input.string("Quantum Gradient", "Color Scheme", options=["Quantum Gradient", "Thermal", "Spectral", "Monochrome"], group=group_visual, tooltip="Color palette for stress visualization.\n\n• Quantum Gradient: Blue→Purple→Red\n• Thermal: Black→Red→Yellow→White\n• Spectral: Full spectrum colors\n• Monochrome: Grayscale elegance")
+show_multiscale_rings = input.bool(true, "Multi-Scale Rings", group=group_visual, tooltip="Display orbital rings for different time scales.\n\nVisualizes how topology changes across timeframes")
+glow_intensity = input.float(0.6, "Glow Intensity", minval=0.0, maxval=1.0, step=0.1, group=group_visual, tooltip="Intensity of the quantum glow effect.\n\n• 0.0: No glow\n• 0.6: Balanced (recommended)\n• 1.0: Maximum glow")
+
+group_dashboard = "📋 Dashboard & Alerts"
+show_dashboard = input.bool(true, "Show Dashboard", group=group_dashboard, tooltip="Display real-time topology status and trading signals")
+show_guide = input.bool(true, "Show Theory Guide", group=group_dashboard, tooltip="Display information about topological market analysis")
+enable_alerts = input.bool(true, "Enable Alerts", group=group_dashboard, tooltip="Send alerts for significant topological events")
+
+// ========================================
+// CORE TOPOLOGICAL CALCULATIONS
+// ========================================
+
+// Normalize price and volume data
+norm_price = (close - ta.sma(close, lookback)) / ta.stdev(close, lookback)
+norm_volume = (math.log(volume + 1) - ta.sma(math.log(volume + 1), lookback)) / ta.stdev(math.log(volume + 1), lookback)
+
+// Advanced hole detection using correlation breakdown
+calculate_topology_stress(period) =>
+    // Price-volume relationship breakdown
+    pv_correlation = ta.correlation(close, volume, period)
+    correlation_breakdown = 1 - math.abs(pv_correlation)
+    
+    // Volatility clustering breakdown
+    volatility = ta.stdev(close, period) / ta.sma(close, period)
+    vol_clustering = ta.correlation(volatility, volatility[1], period)
+    vol_breakdown = 1 - math.abs(vol_clustering)
+    
+    // Market microstructure stress
+    price_efficiency = math.abs(close - ta.ema(close, period)) / ta.atr(period)
+    
+    // Combine into topology stress metric
+    raw_stress = (correlation_breakdown * 0.4 + vol_breakdown * 0.3 + price_efficiency * 0.3)
+    
+    // Normalize relative to recent history
+    stress_ma = ta.sma(raw_stress, period)
+    stress_std = ta.stdev(raw_stress, period)
+    normalized_stress = (raw_stress - stress_ma) / (stress_std + 0.0001)
+    
+    normalized_stress
+
+// Calculate at multiple scales
+micro_stress = calculate_topology_stress(micro_scale)
+meso_stress = calculate_topology_stress(meso_scale)
+macro_stress = calculate_topology_stress(macro_scale)
+primary_stress = calculate_topology_stress(lookback)
+
+// Multi-scale combination
+combined_stress = enable_multiscale ? 
+                 (micro_stress * 0.3 + meso_stress * 0.4 + macro_stress * 0.3) : 
+                 primary_stress
+
+// Apply smoothing
+smoothed_stress = smoothing_method == "EMA" ? ta.ema(combined_stress, smoothing_period) :
+                 smoothing_method == "SMA" ? ta.sma(combined_stress, smoothing_period) :
+                 smoothing_method == "RMA" ? ta.rma(combined_stress, smoothing_period) :
+                 ta.wma(combined_stress, smoothing_period)
+
+// Persistence tracking
+var float persistence = 0.0
+persistence := smoothed_stress > hole_threshold ? persistence + 1 : 0
+
+// Collapse detection
+stress_ma = ta.sma(smoothed_stress, lookback)
+stress_std = ta.stdev(smoothed_stress, lookback)
+collapse_detected = smoothed_stress < stress_ma * collapse_sensitivity and persistence > micro_scale
+
+// Extreme stress detection
+extreme_stress = smoothed_stress > stress_ma + stress_std * 2
+
+// Normalization for visualization
+stress_range_high = ta.highest(smoothed_stress, lookback * 2)
+stress_range_low = ta.lowest(smoothed_stress, lookback * 2)
+stress_normalized = (smoothed_stress - stress_range_low) / (stress_range_high - stress_range_low + 0.0001)
+
+// ========================================
+// QUANTUM COLOR FUNCTIONS
+// ========================================
+
+get_quantum_color(intensity, scheme) =>
+    if scheme == "Quantum Gradient"
+        color.from_gradient(intensity, 0, 1, 
+                           color.new(#1e1b4b, 20),  // Deep space blue
+                           color.new(#dc2626, 20))  // Quantum red
+    else if scheme == "Thermal"
+        color.from_gradient(intensity, 0, 1,
+                           color.new(#000000, 20),  // Black
+                           color.new(#ff6600, 20))  // Hot orange
+    else if scheme == "Spectral"
+        color.from_gradient(intensity, 0, 1,
+                           color.new(#4c1d95, 20),  // Purple
+                           color.new(#fbbf24, 20))  // Gold
+    else // Monochrome
+        color.from_gradient(intensity, 0, 1,
+                           color.new(#1f2937, 20),  // Dark gray
+                           color.new(#e5e7eb, 20))  // Light gray
+
+// ========================================
+// ELEGANT VISUALIZATION
+// ========================================
+
+// Main stress wave
+primary_color = get_quantum_color(stress_normalized, color_scheme)
+glow_color = color.new(primary_color, math.round(70 - glow_intensity * 40))
+
+// Fabric style determines line style and appearance
+line_style = fabric_style == "Topological Mesh" ? plot.style_stepline :
+             fabric_style == "Phase Space" ? plot.style_circles : 
+             plot.style_line
+
+line_width = fabric_style == "Minimal" ? 2 : 3
+glow_width = fabric_style == "Minimal" ? 4 : math.round(6 * glow_intensity)
+
+// Core stress line with glow
+plot(smoothed_stress, "Quantum Stress", primary_color, line_width, style=line_style)
+plot(smoothed_stress, "Stress Glow", glow_color, glow_width)
+
+// Equilibrium and boundaries
+plot(stress_ma, "Equilibrium", color.new(color.silver, 60), 1, plot.style_line)
+
+upper_bound = stress_ma + stress_std
+lower_bound = stress_ma - stress_std
+upper_plot = plot(upper_bound, "Upper Field", color.new(color.red, 80), 1)
+lower_plot = plot(lower_bound, "Lower Field", color.new(color.green, 80), 1)
+
+// Quantum fabric fill - different alpha based on style
+fabric_alpha = fabric_style == "Minimal" ? 98 : 
+               fabric_style == "Quantum Field" ? 85 :
+               fabric_style == "Topological Mesh" ? 92 :
+               fabric_style == "Phase Space" ? 88 : 92
+
+fabric_color = get_quantum_color(stress_normalized, color_scheme)
+fill(upper_plot, lower_plot, color.new(fabric_color, fabric_alpha))
+
+// Multi-scale rings (subtle and elegant) - affected by fabric style
+ring_style = fabric_style == "Phase Space" ? plot.style_line : plot.style_circles
+ring_alpha = fabric_style == "Minimal" ? 85 : 75
+
+micro_level = enable_multiscale and show_multiscale_rings ? ta.ema(micro_stress, 3) * 0.6 + stress_ma * 0.4 : na
+meso_level = enable_multiscale and show_multiscale_rings ? ta.ema(meso_stress, 3) * 0.7 + stress_ma * 0.3 : na
+
+plot(micro_level, "Micro Ring", color.new(color.aqua, ring_alpha), 1, ring_style)
+plot(meso_level, "Meso Ring", color.new(color.orange, ring_alpha), 1, ring_style)
+
+// Reference lines
+hline(0, "Zero Field", color.new(color.white, 85), hline.style_dotted)
+hline(hole_threshold, "Hole Threshold", color.new(color.yellow, 70), hline.style_dashed)
+
+// ========================================
+// SLEEK QUANTUM DASHBOARD WITH CLEAR LABELS
+// ========================================
+
+var table dashboard = table.new(position.top_right, 3, 7, bgcolor=color.new(#0a0a0a, 10), border_width=0)
+
+if barstate.islast and show_dashboard
+    // Spacer row to prevent window button overlap
+    table.cell(dashboard, 0, 0, "", text_size=size.tiny, bgcolor=color.new(color.black, 100))
+    table.cell(dashboard, 1, 0, "", text_size=size.tiny, bgcolor=color.new(color.black, 100))
+    table.cell(dashboard, 2, 0, "", text_size=size.tiny, bgcolor=color.new(color.black, 100))
+    
+    // Header with quantum glow effect
+    table.cell(dashboard, 0, 1, "🌌", text_color=color.new(#8b5cf6, 0), text_size=size.large, bgcolor=color.new(#1a1a2e, 20))
+    table.cell(dashboard, 1, 1, "QUANTUM FABRIC", text_color=color.new(#ffffff, 0), text_size=size.normal, bgcolor=color.new(#1a1a2e, 20))
+    table.cell(dashboard, 2, 1, "", bgcolor=color.new(#1a1a2e, 20))
+    
+    // Main topology state - same size as other elements
+    topology_icon = extreme_stress ? "🌋" : collapse_detected ? "🕳️" : smoothed_stress > hole_threshold ? "⚡" : "✨"
+    topology_state = extreme_stress ? "CRITICAL" : collapse_detected ? "COLLAPSE" : smoothed_stress > hole_threshold ? "STRESSED" : "STABLE"
+    state_color = extreme_stress ? #ff4444 : collapse_detected ? #ff8800 : smoothed_stress > hole_threshold ? #ffaa00 : #44ff88
+    
+    table.cell(dashboard, 0, 2, topology_icon, text_color=color.new(state_color, 0), text_size=size.normal)
+    table.cell(dashboard, 1, 2, topology_state, text_color=color.new(state_color, 0), text_size=size.normal)
+    table.cell(dashboard, 2, 2, "", text_size=size.tiny)
+    
+    // Stress meter with clear label and visible color
+    stress_bars = math.round(stress_normalized * 10)
+    stress_visual = ""
+    for i = 1 to 10
+        stress_visual := stress_visual + (i <= stress_bars ? "█" : "░")
+    
+    table.cell(dashboard, 0, 3, "STRESS", text_color=color.new(#888888, 0), text_size=size.tiny)
+    table.cell(dashboard, 1, 3, stress_visual, text_color=color.new(state_color, 0), text_size=size.small)
+    table.cell(dashboard, 2, 3, str.tostring(math.round(stress_normalized * 100)) + "%", text_color=color.new(state_color, 0), text_size=size.small)
+    
+    // Fabric integrity with clear label
+    integrity_dots = stress_normalized < 0.3 ? "●●●●●" : stress_normalized < 0.7 ? "●●●○○" : "●○○○○"
+    integrity_color = stress_normalized < 0.3 ? #44ff88 : stress_normalized < 0.7 ? #ffaa00 : #ff4444
+    
+    table.cell(dashboard, 0, 4, "FABRIC", text_color=color.new(#888888, 0), text_size=size.tiny)
+    table.cell(dashboard, 1, 4, integrity_dots, text_color=color.new(integrity_color, 0), text_size=size.normal)
+    table.cell(dashboard, 2, 4, "", text_size=size.tiny)
+    
+    // Action signal with clear label
+    action_icon = extreme_stress ? "🛑" : collapse_detected ? "🔄" : smoothed_stress > hole_threshold ? "⚠️" : "✅"
+    action_text = extreme_stress ? "REDUCE" : collapse_detected ? "ADAPT" : smoothed_stress > hole_threshold ? "WATCH" : "TRADE"
+    
+    table.cell(dashboard, 0, 5, "ACTION", text_color=color.new(#888888, 0), text_size=size.tiny)
+    table.cell(dashboard, 1, 5, action_text, text_color=color.new(#ffffff, 0), text_size=size.normal)
+    table.cell(dashboard, 2, 5, action_icon, text_color=color.new(#ffffff, 0), text_size=size.normal)
+
+// ========================================
+// UPDATED THEORY GUIDE - DASHBOARD FOCUSED
+// ========================================
+
+var table guide = table.new(position.bottom_left, 1, 2, bgcolor=color.new(color.black, 90), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast and show_guide
+    // Spacer row to prevent window button overlap
+    table.cell(guide, 0, 0, "", text_size=size.tiny, bgcolor=color.new(color.black, 100))
+    
+    guide_text = "🌌 QUANTUM FABRIC DASHBOARD:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+                 "📊 READING THE DASHBOARD:\n" +
+                 "• TOPOLOGY STATE: Current market condition\n" +
+                 "  ✨ STABLE = Normal trading\n" +
+                 "  ⚡ STRESSED = Increased volatility\n" +
+                 "  🕳️ COLLAPSE = Regime shift\n" +
+                 "  🌋 CRITICAL = Extreme conditions\n\n" +
+                 "• FABRIC DOTS: Structure integrity\n" +
+                 "  ●●●●● = Intact (strong structure)\n" +
+                 "  ●●●○○ = Stressed (weakening)\n" +
+                 "  ●○○○○ = Fractured (breaking down)\n\n" +
+                 "• ACTION: Trading recommendation\n" +
+                 "  ✅ TRADE = Normal conditions\n" +
+                 "  ⚠️ WATCH = Monitor closely\n" +
+                 "  🔄 ADAPT = Change strategy\n" +
+                 "  🛑 REDUCE = Lower risk exposure"
+    
+    table.cell(guide, 0, 1, guide_text, text_color=color.white, text_size=size.tiny)
+
+// ========================================
+// ALERTS
+// ========================================
+
+if enable_alerts
+    // Extreme stress alert
+    if extreme_stress and not extreme_stress[1]
+        alert("🌌 EXTREME TOPOLOGICAL STRESS DETECTED!\nMarket fabric under severe deformation.\nConsider reducing risk exposure.", alert.freq_once_per_bar)
+    
+    // Collapse alert
+    if collapse_detected and not collapse_detected[1]
+        alert("🕳️ TOPOLOGICAL COLLAPSE DETECTED!\nRegime shift in progress.\nAdapt trading strategy immediately.", alert.freq_once_per_bar)
+    
+    // Hole formation alert
+    if smoothed_stress > hole_threshold and smoothed_stress[1] <= hole_threshold
+        alert("⚡ TOPOLOGICAL HOLE FORMING!\nMarket structure breakdown detected.\nMonitor closely for volatility.", alert.freq_once_per_bar)
+    
+    // Recovery alert
+    if smoothed_stress <= hole_threshold and smoothed_stress[1] > hole_threshold
+        alert("✨ TOPOLOGY STABILIZING!\nMarket structure recovering.\nNormal trading conditions resuming.", alert.freq_once_per_bar)

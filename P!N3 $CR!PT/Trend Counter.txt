@@ -1,0 +1,408 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Nathan J. Hart (insideandup)
+
+// ABOUT THIS INDICATOR
+//
+// TREND COUNTER is a Trend Exhaustion Indicator that tracks the persistence of price movements over a series of bars, helping traders identify potential trend exhaustion and reversals.
+// It compares each bar's value (typically the closing price) to a previous bar from a set lookback period (the lookback bar), counting consecutive bullish or bearish price movements.
+// The count resets when the trend reverses, signaling a potential shift in momentum.
+//
+// • Price movement is considered bullish if the current price exceeds the lookback bar's price, incrementing the bullish count with each consecutive occurrence.  
+// • Price movement is considered bearish if the current price is lower than the lookback bar's price, incrementing the bearish count with each consecutive occurrence.  
+// • The count resets when the trend reverses.  
+// • The user sets the threshold for sequence resets by defining the maximum number of consecutive occurrences.  
+// • The count may reset before a trend reversal if it surpasses the user-defined threshold.
+//
+// This type of indicator is useful for detecting trends, trend exhaustion, overbought or oversold conditions, and potential reversal points, helping traders anticipate market turns.
+//
+// • Sequential occurrences gauge trend strength. 
+// A long sequence of bullish bars suggests strong upward momentum, while consecutive bearish bars indicate sustained downward pressure. 
+// This helps traders assess whether a trend is likely to continue or weaken.
+//
+// • Identify thresholds for potential reversal points.
+// Counting consecutive bullish or bearish price movements can highlight overextended trends.
+// A trend reaching a predefined threshold may signal an upcoming reversal or momentum slowdown.
+//
+// • Identify potential entry or exit points. 
+// If trends are showing signs of exhaustion after a certain number of consecutive price movements, traders may use this for timing adjustments to their position.
+//
+// • Assess risk.
+// Understanding trend strength helps traders better adjust stop-loss or take-profit levels. 
+// Sequential counting provides a structured approach to trade management.
+//
+// Visualization & Customization
+// The Sequential Momentum indicator visually represents consecutive bullish or bearish price movements to define trends and highlight key shifts.
+//
+// • The bullish/bearish bar sequences are based on user-defined thresholds.
+// • Customizable bar coloring, labels, and plot shapes enhanced trend visualization.
+// • Dynamic color transitions make trend shifts easily identifiable.
+//
+// Tracking consecutive bullish or bearish price movements can be effective when combined with other indicators or applied in specific market conditions (e.g., trending or volatile markets).  
+// However, its reliability depends on market conditions and the trader’s interpretation.  
+// This indicator is best used as a complementary tool rather than a standalone signal, helping traders visualize and quantify market momentum within a broader strategy.  
+//
+// "Trend Counter" or "Sequential Momentum"
+// Created by 3iau 2025 February 17
+// Published: 2025 Feb 24
+
+// @version=5
+
+indicator("Trend Counter", shorttitle = "Trend Counter", max_bars_back = 5000, overlay=true)
+
+// Label options
+
+lbl_style_above = label.style_label_down // label.style_label_down
+lbl_style_below = label.style_label_up // label.style_label_up
+lbl_color_black = color.rgb(40, 44, 52, 0)
+lbl_color_white = color.rgb(220, 223, 228, 0)
+lbl_color_transwhite = color.rgb(220, 223, 228, 15)
+lbl_color_trans = color.rgb(220, 223, 228, 97)
+lbl_textcolor_black = color.rgb(40, 44, 52, 0)
+lbl_textcolor_white = color.rgb(220, 223, 228, 0)
+lbl_textcolor_bearish = color.rgb(229, 192, 123, 0)
+lbl_textcolor_bullish = color.rgb(97, 175, 239, 0)
+
+group_Bars = "Colored bars"
+
+group_Part01 = "Track consecutive occurrences of bullish or bearish price movement."
+
+tooltip_Part0101 = "Compare each bar's value (closing price, typical price, etc) to a previous bar from a set lookback period."
+
+tooltip_Part0102 = "Select 3 terms from the consecutive occurrence count sequence. The sequence starts at 1 and ends at the highest selected term.
+ \n\nUser-defined occurrences are labeled, with the highest selected term serving as the sequence threshold.
+ \n\nThe count resets if the trend reverses or exceeds the user-defined threshold.
+ \n\nThe default selections {4,7,11} ⊂ S, where S = {1,2,3,…,11}, are Lucas numbers (OEIS A000032): 1, 3, 4, 7, 11, 18, 29...
+ \n\nConsider selections {5,8,13} ⊂ S, where S = {1,2,3,…,13}, which are Fibonacci numbers (OEIS A000045): 1, 2, 3, 5, 8, 13, 21..."
+
+tooltip_Part0103 = "Apply a label to the threshold bar if the user-defined threshold is reached and its high (or low) is the highest high (or lowest low) in the entire sequence of consecutive occurrences."
+
+group_Part02 = "Identify non-consecutive occurrences of bullish or bearish price movement."
+
+tooltip_Part0201 = "Compare each bar's value (closing price, typical price, etc) to a previous bar from a set lookback period."
+
+// PART 1 BEGIN
+
+// User inputs
+
+// Enable Bar Coloring
+enableBarColoring = input(false, title = "Enable Bar Coloring", group = group_Bars)
+
+// Enable Labels
+enableLabels = input(true, title = "Enable Labels", group = group_Part01)
+
+// Squence Count Label Y-Position Offset
+tooltip_yposition = "Select a number between 0 and 10+. A selection of 0 positions the label on the bar. A selection greater than 0 moves the label vertically away from the bar for improved readability."
+yposition_maxval = 1000
+lbl_yposition_count = input.float(2, minval = 0, maxval = yposition_maxval, step = 0.5, title = "Label Offset", group = group_Part01, tooltip = tooltip_yposition)
+
+// Label Size
+lbl_size_select = input.string("Small", title = "Lable size", options = ["Tiny", "Small", "Normal", "Large"], group = group_Part01)
+lbl_size = size.small
+
+if lbl_size_select == "Tiny"
+    lbl_size := size.tiny
+else if lbl_size_select == "Small"
+    lbl_size := size.small
+else if lbl_size_select == "Normal"
+    lbl_size := size.normal
+else if lbl_size_select == "Large"
+    lbl_size := size.large
+
+// Define Bar Source
+
+source_val = input.string("Close", title = "Source", options = ["Open", "High", "Low", "Close", "Median HL/2", "Typical HLC/3", "Average OHLC/4", "Body Median OC/2", "Weighted Close HL2C/4", "Biased HC/2 if Close > Open, else LC/2", "Biased High if Close > HL/2, else Low", "Biased High if Close > Open, else Low"], group = group_Part01)
+
+source = switch source_val
+    "High"                             => high
+    "Low"                              => low
+    "Open"                             => open
+    "Close"                            => close
+    "Median HL/2"                      => hl2
+    "Typical HLC/3"                    => hlc3
+    "Average OHLC/4"                   => ohlc4
+    "Body Median OC/2"                 => (open + close) / 2
+    "Weighted Close HL2C/4"            => (high + low + 2 * close) / 4
+    "Biased HC/2 if Close > Open, else LC/2" => close > open ? (high + close) / 2 : (low + close) / 2
+    "Biased High if Close > HL/2, else Low"  => close > hl2 ? high : low
+    "Biased High if Close > Open, else Low"  => close > open ? high : low
+    => 1.0  // Default value if no match
+
+// Lookback Period
+lookback = input.int(4, title = "Lookback", group = group_Part01, tooltip = tooltip_Part0101)
+
+// User-defined occurrences to label, the max of which is the sequence threshold
+A = input.int(4, minval = 1, step = 1, title = "Occurrence A", group = group_Part01, tooltip = tooltip_Part0102)
+B = input.int(7, minval = 1, step = 1, title = "Occurrence B", group = group_Part01)
+C = input.int(11, minval = 1, step = 1, title = "Occurrence C", group = group_Part01)
+
+// Max and Min Labels
+enableMaxMinLabels = input(true, title = "Enable 'Max' & 'Min' Labels", group = group_Part01, tooltip = tooltip_Part0103)
+
+// Squence Max/Min Label Y-Position Offset
+lbl_yposition_max = input.float(10, minval = 0, maxval = yposition_maxval, step = 0.5, title = "Label Offset", group = group_Part01, tooltip = tooltip_yposition)
+
+maxMinLabelFormat = input.string("max[a,b]", title = "Label Format", 
+  options = ["max[a,b]", "a∨b", "∨"], group=group_Part01)
+
+// Define trend conditions
+bullish = source > source[lookback]
+bearish = source < source[lookback]
+
+// Track consecutive trends
+var int count = 0
+var bool lastTrendBullish = na
+if bullish
+    count := lastTrendBullish == false ? 1 : count + 1
+    lastTrendBullish := true
+else if bearish
+    count := lastTrendBullish == true ? 1 : count + 1
+    lastTrendBullish := false
+else
+    count := 0
+    lastTrendBullish := na
+
+// Define max/min label text based on user selection
+lbltxt_max = maxMinLabelFormat == "max[a,b]" ? "max\n[1," + str.tostring(str.format("{0,number,#}", count)) + "]" : maxMinLabelFormat == "a∨b" ? "1∨" + str.tostring(str.format("{0,number,#}", count)) : "∨"
+
+lbltxt_min = maxMinLabelFormat == "max[a,b]" ? "min\n[1," + str.tostring(str.format("{0,number,#}", count)) + "]" : maxMinLabelFormat == "a∨b" ? "1∧" + str.tostring(str.format("{0,number,#}", count)) : "∧"
+
+lbltxt = bullish ? lbltxt_max : lbltxt_min
+
+// Define colors - Begin
+
+// Function to interpolate colors between two RGB values
+colorTransition(startColor, endColor, step, maxSteps) =>
+    // Ensure step is within bounds
+    adjustedStep = math.max(1, math.min(step, maxSteps))  
+    
+    // Extract RGB components
+    startR = color.r(startColor)
+    startG = color.g(startColor)
+    startB = color.b(startColor)
+    
+    endR = color.r(endColor)
+    endG = color.g(endColor)
+    endB = color.b(endColor)
+    
+    // Interpolate RGB values
+    r = startR + ((endR - startR) * (adjustedStep - 1) / (maxSteps - 1))
+    g = startG + ((endG - startG) * (adjustedStep - 1) / (maxSteps - 1))
+    b = startB + ((endB - startB) * (adjustedStep - 1) / (maxSteps - 1))
+    
+    // Return interpolated color
+    color.rgb(math.round(r), math.round(g), math.round(b))
+
+// Dynamic color selection for Bullish trend (becoming overbought -> transitioning from blue to green)
+getSellColorDynamic(count, maxCount) =>
+    colorTransition(color.rgb(97, 175, 239), color.rgb(152, 195, 121), count, maxCount)
+
+// Dynamic color selection for Bearish trend (becoming oversold -> transitioning from yellow to red)
+getBuyColorDynamic(count, maxCount) =>
+    colorTransition(color.rgb(229, 192, 123), color.rgb(224, 108, 117), count, maxCount)
+
+// Set label transparency level (0 for fully opaque, 100 for fully transparent)
+transparencyLevel = 20  // Adjust this value between 0 and 100
+
+// Define colors - End
+
+// Determine max occurrences
+maxOccurrences = math.max(A, math.max(B, C))
+resetCondition = count >= maxOccurrences or (bullish and lastTrendBullish == false) or (bearish and lastTrendBullish == true)
+
+// Store high/low over range
+var float rangeHigh = na
+var float rangeLow = na
+if count == 1
+    rangeHigh := high
+    rangeLow := low
+else if count > 1 and count <= maxOccurrences
+    rangeHigh := math.max(rangeHigh, high)
+    rangeLow := math.min(rangeLow, low)
+
+// Apply bar colors if enabled
+barcolor(enableBarColoring ? 
+   (bullish ? getSellColorDynamic(count, maxOccurrences) : 
+   bearish ? getBuyColorDynamic(count, maxOccurrences) : na) : na)
+
+// Label occurrences if enabled
+if enableLabels
+    labelColor = bullish ? color.new(getSellColorDynamic(count, maxOccurrences), transparencyLevel) : bearish ? color.new(getBuyColorDynamic(count, maxOccurrences), transparencyLevel) : color.new(color.blue, transparencyLevel)
+    if count == A or count == B or count == C
+        label_style = bearish ? lbl_style_above : lbl_style_below
+        label_position = bearish ? high + syminfo.mintick * lbl_yposition_count : low - syminfo.mintick * lbl_yposition_count
+        label.new(
+          x = bar_index, 
+          y = label_position,
+          text = str.tostring(count), 
+          color = labelColor, 
+          textcolor = lbl_color_black, 
+          size = lbl_size, 
+          style = label_style)
+
+    // Label "max" and "min" if enabled
+    if enableMaxMinLabels
+        if count == maxOccurrences
+            if high == rangeHigh
+                label.new(
+                  x = bar_index, 
+                  y = high + syminfo.mintick * lbl_yposition_max, 
+                  text = lbltxt, // max 
+                  color = lbl_color_transwhite, 
+                  textcolor = lbl_color_black, 
+                  size = lbl_size, 
+                  style = lbl_style_above)
+            if low == rangeLow
+                label.new(
+                  x = bar_index, 
+                  y = low - syminfo.mintick * lbl_yposition_max, 
+                  text = lbltxt, // min
+                  color = lbl_color_transwhite, 
+                  textcolor = lbl_color_black, 
+                  size = lbl_size, 
+                  style = lbl_style_below)
+
+// Max and Min labels
+// lbltxt_max = "max\n[1," + str.tostring(str.format("{0,number,#}", count)) + "]"
+// lbltxt_min = "min\n[1," + str.tostring(str.format("{0,number,#}", count)) + "]"
+// ∨ is an abbreviation for max.
+// ∧ is an abbreviation for min. 
+
+// Reset conditions
+if resetCondition
+    count := 0
+    rangeHigh := na
+    rangeLow := na
+
+// PART 1 END
+
+// PART 2 BEGIN
+
+// PART 2 BEGIN
+
+// User inputs for plotshape settings
+enablePlotShapes = input(true, title = "Enable Plotshapes", group = group_Part02) // Toggle On/Off
+
+// User input for transparency level (0 = opaque, 100 = fully transparent)
+shapeTransparency = input.int(50, title = "Plotshape Transparency", minval = 5, maxval = 95, step = 1, group = group_Part02)
+
+// User selection for Bullish and Bearish plot shapes
+plotshapeShape = input.string("Circle", title = "Plotshape", options = ["Arrow", "Circle", "Diamond", "Triangle"], group = group_Part02)
+
+// Function to get the correct shape
+getShape(shapeType, isBullish) =>
+   shapeType == "Arrow" ? (isBullish ? shape.arrowup : shape.arrowdown) :
+   shapeType == "Triangle" ? (isBullish ? shape.triangleup : shape.triangledown) :
+   shapeType == "Circle" ? shape.circle :
+   shapeType == "Diamond" ? shape.diamond :
+   shape.circle  // Default fallback
+
+// Lookback comparison for identifying Bullish and Bearish trends
+plotShapeLookback = input.int(4, title = "Lookback", group = group_Part02, tooltip = tooltip_Part0201) // Custom Lookback Period
+
+// Adjust colors with transparency
+bullishShapeColor = color.new(getSellColorDynamic(count, maxOccurrences), shapeTransparency)
+bearishShapeColor = color.new(getBuyColorDynamic(count, maxOccurrences), shapeTransparency)
+
+// Bullish condition: Current bar > bar(plotShapeLookback)
+bullishCondition = source > source[plotShapeLookback]
+
+// Bearish condition: Current bar < bar(plotShapeLookback)
+bearishCondition = source < source[plotShapeLookback]
+
+// Plot selected shapes above/below bars based on trend condition
+plotshape(enablePlotShapes and bullishCondition,
+  style = getShape(plotshapeShape, true), 
+  location = location.abovebar, 
+  color = bullishShapeColor, 
+  size = size.tiny)
+
+plotshape(enablePlotShapes and bearishCondition, 
+  style = getShape(plotshapeShape, false), 
+  location = location.belowbar, 
+  color = bearishShapeColor, 
+  size = size.tiny)
+
+// PART 2 END
+
+// END
+
+// NOTES BEGIN
+// 
+// NUMBERS SEQUENCES
+//
+// Fibonacci numbers sequence (OEIS A000045, A000129): 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181...
+//   The ratio between two consecutive Fibonacci numbers converges to the golden ratio. The golden ratio is related to the pentagon.
+//
+// Leonardo numbers sequence (OEIS A001595): 1, 1, 3, 5, 9, 15, 25, 41, 67, 109, 177, 287, 465, 753, 1219, 1973, 3193, 5167...
+//
+// Prime numbers (OEIS A000040): 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101...
+//
+// Lucas numbers sequence (OEIS A000032): 2, 1, 3, 4, 7, 11, 18, 29, 47, 76, 123, 199, 322, 521, 843, 1364, 2207, 3571, 5778...
+//   The ratio between two consecutive Lucas numbers converges to the golden ratio.
+// 
+// Prime Lucas numbers' positions within the sequence up to L(1000), i.e. Indices of prime Lucas numbers (OEIS A001606): 2, 4, 5, 7, 8, 11, 13, 16, 17, 19, 31, 37, 41, 47, 53, 61, 71, 79, 113, 313, 353, 503, 613, 617, 863.
+//
+//  Pell numbers sequence (OEIS A000204): 0, 1, 2, 5, 12, 29, 70, 169, 408, 985, 2378, 5741...
+//   The ratio between two consecutive Pell numbers converges to the silver ratio. Silver ratio is related to the regular octagon.
+// 
+// Pell–Lucas numbers sequence (aka, Companion Pell numbers, OEIS A002203): 2, 2, 6, 14, 34, 82, 198, 478, 1154, 2786, 6726...
+// 
+// Padovan numbers (OEIS A000931): 1, 0, 0, 1, 0, 1, 1, 1, 2, 2, 3, 4, 5, 7, 9, 12, 16, 21, 28, 37, 49, 65, 86, 114, 151, 200, 265, 351, 465, 616, 816, 1081, 1432, 1897, 2513, 3329, 4410, 5842...
+//   Equilateral triangles with side lengths following the Padovan sequence produce a spiral.
+// 
+// Perrin numbers sequence (aka, Ondrej Such numbers, OEIS A001608): 3, 0, 2, 3, 2, 5, 5, 7, 10, 12, 17, 22, 29, 39, 51, 68, 90, 119, 158, 209, 277, 367, 486, 644, 853, 1130, 1497, 1983, 2627, 3480, 4610...
+//   Equilateral triangles with side lengths following the Perrin sequence produce a spiral.
+// 
+// Jacobsthal numbers sequence (OEIS A001045): 0, 1, 1, 3, 5, 11, 21, 43, 85, 171, 341, 683, 1365, 2731, 5461...
+// 
+// COLOR SCHEMES
+//
+// ONE HALF LIGHT by Son A. Pham at github.com/sonph/onehalf
+// NAME       HEX      RGB
+// Black      #383a42  56, 58, 66
+// red        #e45649  228, 86, 73
+// green      #50a14f  80, 161, 79
+// yellow     #c18401  193, 132, 1
+// blue       #0184bc  1, 132, 188
+// magenta    #a626a4  166, 38, 164
+// cyan       #0997b3  9, 151, 179
+// white      #fafafa  250, 250, 250
+// foreground #fafafa  250, 250, 250
+// background #383a42  56, 58, 66
+//
+// ONE HALF DARK by Son A. Pham at github.com/sonph/onehalf
+//           HEX      RGB
+// black      #282c34  40, 44, 52
+// red        #e06c75  224, 108, 117
+// green      #98c379  152, 195, 121
+// yellow     #e5c07b  229, 192, 123
+// blue       #61afef  97, 175, 239
+// magenta    #c678dd  198, 120, 221
+// cyan       #56b6c2  86, 182, 194
+// white      #dcdfe4  220, 223, 228
+// foreground #dcdfe4  220, 223, 228
+// background #282c34  40, 44, 52
+//
+// ONE HALF LIGHT by Son A. Pham at github.com/sonph/onehalf
+
+Colortest01_light = color.rgb(56, 58, 66, 100) // black, background
+Colortest02_light = color.rgb(228, 86, 73, 100) // red
+Colortest03_light = color.rgb(80, 161, 79, 100) // green
+Colortest04_light = color.rgb(193, 132, 1, 100) // yellow
+Colortest05_light = color.rgb(1, 132, 188, 100) // blue
+Colortest06_light = color.rgb(166, 38, 164, 100) // magenta
+Colortest07_light = color.rgb(9, 151, 179, 100) // cyan
+Colortest08_light = color.rgb(250, 250, 250, 100) // white, foreground
+
+// ONE HALF DARK by Son A. Pham at github.com/sonph/onehalf
+
+Colortest01_dark = color.rgb(40, 44, 52, 100) // black, background
+Colortest02_dark = color.rgb(224, 108, 117, 100) // red
+Colortest03_dark = color.rgb(152, 195, 121, 100) // green
+Colortest04_dark = color.rgb(229, 192, 123, 100) // yellow
+Colortest05_dark = color.rgb(97, 175, 239, 100) // blue
+Colortest06_dark = color.rgb(198, 120, 221, 100) // magenta
+Colortest07_dark = color.rgb(86, 182, 194, 100) // cyan
+Colortest08_dark = color.rgb(220, 223, 228, 100) // white, foreground
+
+// NOTES END

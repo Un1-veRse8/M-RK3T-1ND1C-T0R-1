@@ -1,0 +1,492 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TradingIQ
+
+//@version=6
+indicator("TPO IQ [TradingIQ]", calc_bars_count = 10000, shorttitle = "TPO IQ", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, max_bars_back = 2000)
+
+enum calcType 
+
+    REG = "Regular"
+    FI  = "Fixed Interval"
+
+timeframe                              = input.timeframe(defval = "", title = "Timeframe")
+singleTPO                              = input.bool(defval = true, title = "Single TPO Detailed")
+singleTPOgradStart                     = input.color(defval = color.rgb(255, 116, 116), title = "Gradient Colors", inline = "Grad")
+singleTPOgradMidS                      = input.color(defval = #74ffbc, inline = "Grad", title = "")
+singleTPOgradMidE                      = input.color(defval = #00bcd4, inline = "Grad", title = "")
+singleTPOgradEnd                       = input.color(defval = #651fff, inline = "Grad", title = "")
+
+
+calcTypeInput                          = input.enum(defval = calcType.REG, title = "Calculation Type", options = [calcType.REG, calcType.FI], group = "Calculation Type")
+
+ticks                                  = input.float(defval = 0 ,title = "Ticks (0 == Auto", group = "Calculation Type")
+textSize                               = input.string(title = "Text Size", defval = "Small", options = ["Auto","Tiny", "Small", "Normal", "Large", "Huge"], group = "Current Session Configurations")
+showIb                                 = input.bool(defval = false, title = "Show Initial Balance Range?", group = "Current Session Configurations")
+
+vaCumu                                 = input.float(defval = 70, title = "Value Area %", minval = 0, maxval = 100) / 100
+sess                                   = input.timeframe(defval = "D", title = "Recalculate After How Much Time?",  group = 'If "Regular" is Selected')
+
+timE                                   = input.session(defval = "1300-1700", title = "Time Range", group = 'If "Fixed Interval" is Selected', tooltip = 'Select "Fixed Interval" For The "Calculation Type" Setting To Activate This Feature')
+
+col                                    = input.color(defval = color.gray, title = "Main Character Color", group = "Colors")
+SPcol                                  = input.color(defval = color.rgb(255, 116, 116)  , title = "SP Character Color", group = "Colors")
+POCcol                                 = input.color(defval = #c7ff74, title = "POC Character Color", group = "Colors")
+IBcol                                  = input.color(defval = color.rgb(128, 116, 255), title = "IB Character Color", group = "Colors")
+vaCol                                  = input.color(defval = #74ffbc, title = "Value Area Color", group = "Colors")
+vaLetterCol                            = input.color(defval = color.white, title = "Value Area Letter Color", group = "Colors")
+
+
+
+type TPOdata
+
+    array<float>  tickLevels 
+    array<string> letters   
+    array<int>    levelCount
+
+type singleTPOUDT
+
+    array<box>   singleTPOdraw
+    array<color> TPOcolor
+
+fixTime = time(timeframe.period, timE)
+
+finTim = switch calcTypeInput
+    
+    calcType.REG => timeframe.change(sess)
+    calcType.FI  => na(fixTime[1]) and not na(fixTime) 
+
+
+sz = switch textSize
+    
+    "Auto"             => size.auto
+    "Tiny"             => size.tiny
+    "Small"            => size.small
+    "Normal"           => size.normal
+    "Large"            => size.large
+    "Huge"             => size.huge
+
+
+
+
+
+method shiftPopAll(array<float> tickLevels, array<string> letters, array<float> levelCount, pop = false) =>
+
+    if tickLevels.size() > 90000
+
+        switch pop 
+
+            false => 
+
+                     tickLevels.shift(), letters.shift(), levelCount.shift()
+
+            =>    
+                     tickLevels.pop()  , letters.pop(), levelCount.pop()
+
+TPO() => 
+
+
+    atr = ta.atr(14)
+
+    [dayStart, dayEnd] = request.security(syminfo.tickerid, "1D", [last_bar_time, time_close], lookahead = barmerge.lookahead_on)
+
+    desiredTF = timeframe.in_seconds(timeframe)
+
+    var finalTF = switch 
+
+        desiredTF < timeframe.in_seconds("") => timeframe.in_seconds("")
+        =>          desiredTF
+
+
+    // [tfHigh, low] = request.security(syminfo.tickerid, timeframe.from_seconds(desiredTF), [high, low])
+
+    var string [] alphabet = array.from( " A", " B", " C", " D", " E", " F", " G", " H", " I", " J", " K", " L", " M", " N", " O", " P", " Q", " R", " S", " T", " U", " V", " W", " X", " Y", " Z", " a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l",   " m", " n", " o", " p", " q", " r", " s", " t", " u", " v", " w", " x", " y", " z")
+
+    lastDay = time >= dayStart and singleTPO and calcTypeInput == calcType.REG
+
+    if calcTypeInput == calcType.FI and barstate.isfirst
+        lastDay := false 
+
+    var tickAmount = 0.
+
+    var TP = TPOdata.new(array.new<float>(), array.new<string>(), array.new<int>())
+
+    var indexGet = 0 , var numberAdd  = 0, var startTime  = 0, 
+    var max      = 0., var min = 20e20   , var IBend      = 0, 
+    var indexIBS = 0., var indexIBE  = 0., var startTick  = 0.
+    var maxIndex = 0 , var indexMax  = 0 , var startBar   = 0
+
+    var TPOdraw       = array.new<label>(), var letterCount = array.new<int>(), 
+    var singleTPOdata = array.new<singleTPOUDT>(), isNew = false       
+
+    if barstate.isfirst
+
+        for i = 0 to 2
+            singleTPOdata.push(singleTPOUDT.new(array.new<box>(), array.new<color>()))
+
+
+    if TPOdraw.size() > 0 
+
+        for i = 0 to TPOdraw.size() - 1
+
+            TPOdraw.shift().delete()
+
+    if finTim
+
+        tickAmount := switch ticks == 0 
+
+            true => atr   * syminfo.mintick
+            =>      ticks * syminfo.mintick
+
+        startTick     := math.floor(open / tickAmount) * tickAmount
+        TP.tickLevels := array.from(startTick - tickAmount, startTick, startTick + tickAmount)
+        TP.letters    := array.from("", "", "")
+        TP.levelCount := array.from(0, 0, 0)
+        letterCount   := array.from(0)
+        isNew         := true 
+
+        singleTPOdata := array.new<singleTPOUDT>()
+
+        for i = 0 to 2
+            singleTPOdata.push(singleTPOUDT.new(array.new<box>(), array.new<color>()))
+
+        label.new(bar_index + 1, open, color = IBcol, style = label.style_circle, size = 2)
+        label.new(bar_index + 1, open, color = color.new(IBcol, 80), style = label.style_circle, size = 3)
+
+        alphabet := array.from( " A", " B", " C", " D", " E", " F", " G", " H", " I", " J", " K", " L", " M", " N", " O", " P", " Q", " R", " S", " T", " U", " V", " W", " X", " Y", " Z", " a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l",   " m", " n", " o", " p", " q", " r", " s", " t", " u", " v", " w", " x", " y", " z")
+
+        IBend := timestamp(year, month, dayofmonth, hour + 1, 00, 00)
+
+        indexGet := -1, numberAdd := 0,     startTime := time, startBar := bar_index
+        max      := 0, min       := 20e20, indexIBS  := startTick, 
+                             indexIBE := startTick
+                             
+ 
+
+    if TP.letters.size() > 0 
+
+        if timeframe.change(timeframe.from_seconds(desiredTF))
+
+            indexGet += 1, letterCount.push(0), indexMax := math.max(indexGet, indexMax)
+
+        if indexGet == alphabet.size()
+
+            numberAdd += 1
+
+            for i = 0 to 51
+
+                alphabet.push(str.tostring(numberAdd) + alphabet.get(i))
+
+        last  = TP.tickLevels.last () 
+        first = TP.tickLevels.first()
+
+        max := math.max(max, high), min := math.min(min, low), 
+
+        while high >= last
+
+            last += tickAmount
+
+            TP.tickLevels.push(last)
+            TP.letters   .push("")
+            TP.levelCount.push(0)
+
+            TP.tickLevels.shiftPopAll(TP.letters, TP.levelCount)
+
+            if lastDay 
+
+                singleTPOdata.push(singleTPOUDT.new(array.new<box>(), array.new<color>()))
+
+        if time_close <= IBend
+
+            indexIBE := math.max(high, indexIBE)
+
+        while low <= first
+
+            first -= tickAmount
+
+            TP.tickLevels.unshift(first)
+            TP.letters   .unshift("")
+            TP.levelCount.unshift(0)
+
+            TP.tickLevels.shiftPopAll(TP.letters, TP.levelCount, true)
+                
+            if lastDay 
+
+                singleTPOdata.unshift(singleTPOUDT.new(array.new<box>(), array.new<color>()))
+
+        if time_close <= IBend 
+
+            indexIBS := math.min(indexIBS, low)
+
+        startIndex = TP.tickLevels.binary_search_leftmost(low)
+        endIndex   = TP.tickLevels.binary_search_leftmost(high)
+
+        for i = startIndex to endIndex 
+
+            price = TP.tickLevels.get(i)
+
+            split = TP.letters.get(i)
+
+            if not str.contains(split, alphabet.get(indexGet))
+
+                TP.letters   .set(i, split + alphabet.get(indexGet))
+                TP.levelCount.set(i, TP.levelCount.get(i) + 1)
+                letterCount  .set(indexGet, letterCount.get(indexGet) + 1)
+
+        timeN1 = startTime + timeframe.in_seconds("") * 1000, getTF = timeframe.from_seconds(desiredTF)
+
+
+        if TP.levelCount.sum() > 500
+
+            lastDay := false 
+
+            if not lastDay[1]
+
+                if singleTPOdata.size() > 0 
+                    for data in singleTPOdata 
+
+                        if data.TPOcolor.size() > 0 
+                            for x = 0 to data.TPOcolor.size() - 1
+
+                                data.singleTPOdraw.shift().delete()
+
+                singleTPOdata.clear()
+
+        getMax = TP.levelCount.max()
+
+        valueIndexStart = 0, valueIndexEnd = 0, pocStart = TP.levelCount.indexof(getMax)
+
+        bottom = 0, top = 0
+
+        sumCount = TP.levelCount.sum(), arrSize = TP.levelCount.size()
+        
+
+        for x = 0 to arrSize - 1
+
+            slice = TP.levelCount.slice(math.max(pocStart - x, 0), math.min(pocStart + x + 1, arrSize))
+
+            if slice.sum() / sumCount >= vaCumu
+
+                bottom := math.max(pocStart - x, 0)
+                top    := math.min(pocStart + x + 1, arrSize - 1)
+                break 
+
+        
+        if not lastDay
+
+            for i = 0 to TP.letters.size() - 1
+
+                getPrice = TP.tickLevels.get(i), getCount = TP.levelCount.get(i)
+
+                colLoop = switch 
+
+                    i == pocStart                                              => POCcol
+                    getCount == 1                                              => SPcol 
+                    getPrice >= indexIBS - tickAmount and getPrice <= indexIBE => IBcol
+                    i >= bottom and i <= top                                   => vaLetterCol
+                    =>                                                            col
+
+                TPOdraw.push(label.new(startTime + timeframe.in_seconds("") * 1000, getPrice, text = TP.letters.get(i), 
+                         color     = #00000000, 
+                         textcolor = colLoop, 
+                         xloc      = xloc.bar_time,
+                         style     = label.style_label_left,
+                         size      = sz
+                         ))
+
+        else 
+
+
+            midDay = math.avg(dayStart, dayEnd)
+
+            colGrad = switch 
+
+                time_close <= midDay => color.from_gradient(indexGet - 1, 0, indexMax / 2, singleTPOgradStart, singleTPOgradMidS)
+                =>                      color.from_gradient(indexGet - 1   , indexMax / 2, indexMax, singleTPOgradMidE, singleTPOgradEnd)
+
+            for i = startIndex to endIndex 
+
+                getLevel = singleTPOdata.get(i), getPrice = TP.tickLevels.get(i), getSize = getLevel.singleTPOdraw.size()
+
+                left = switch getSize
+            
+                    0 => startBar + 2
+                    =>   getLevel.singleTPOdraw.last().get_right()
+
+                colLoop = switch 
+
+                    i == pocStart                                              => POCcol
+                    getSize == 0                                               => SPcol 
+                    getPrice >= indexIBS - tickAmount and getPrice <= indexIBE => IBcol
+                    i >= bottom and i <= top                                   => vaLetterCol
+                    =>                                                            col
+
+                transp = switch 
+                    
+                    i >= bottom and i <= top => 0
+                    =>                          60
+
+                getLevel.TPOcolor.push(colGrad)
+
+                getLevel.singleTPOdraw.push(
+                         box.new(
+                                 left, getPrice, left + 1, getPrice + tickAmount,
+                                         border_color = #000000,
+                                         bgcolor      = color.new(colGrad, transp), 
+                                         text         = alphabet.get(indexGet), 
+                                         text_color   = color.white
+                                         )) 
+
+        if barstate.islast 
+
+            if singleTPOdata.size() > 0 
+
+                for i = 0 to singleTPOdata.size() - 1
+
+                    getData = singleTPOdata.get(i)
+
+                    if getData.singleTPOdraw.size() > 0
+
+                        for x = 0 to getData.singleTPOdraw.size() - 1
+
+                            transp = switch 
+                        
+                                i >= bottom and i <= top => 0
+                                =>                          60
+
+                            getData.singleTPOdraw.get(x).set_bgcolor(color.new(getData.TPOcolor.get(x), transp))
+                            
+
+        var box       VAbox                 = box  (na)
+        var line      sessionLineLower      = line (na)
+        var line      sessionOutlineLower   = line (na)
+        var line      sessionLineUpper      = line (na)
+        var line      sessionOutlineUpper   = line (na)
+        var label     tpoLab                = label(na)
+        var line      VAline                = line(na)
+        var line      VAlineOutline         = line(na)
+        var line      IBline                = line(na)
+        var line      IBoutline             = line(na)
+
+        VAbox               .delete(), sessionLineLower    .delete(), sessionOutlineLower .delete()
+        sessionLineUpper    .delete(), sessionOutlineUpper .delete(), tpoLab              .delete()
+        VAline              .delete(), VAlineOutline       .delete(), IBline              .delete(),
+                                             IBoutline.delete()
+
+        getTop    = TP.tickLevels.get(top), getBot = TP.tickLevels.get(bottom), 
+        topLetter = alphabet.get(letterCount.indexof(letterCount.max()))
+
+        sessionLineLower      := line.new(startTime, min - tickAmount, startTime, getBot, xloc = xloc.bar_time, 
+                                         color = col
+                                         )
+
+        sessionOutlineLower   := line.new(startTime, min - tickAmount, startTime, getBot, xloc = xloc.bar_time, 
+                                         color = color.new(col, 80),
+                                         width = 5
+                                         ) 
+
+        sessionLineUpper      := line.new(startTime, getTop, startTime, max + tickAmount, xloc = xloc.bar_time, 
+                                         color = col
+                                         )
+
+        sessionOutlineUpper   := line.new(startTime, getTop, startTime, max + tickAmount, xloc = xloc.bar_time, 
+                                         color = color.new(col, 80),
+                                         width = 5
+                                         ) 
+
+        tpoLabSize = input.int(7, title = "TPO Overview Label Size")
+        tpoLab                := label.new(math.round(math.avg(startTime, time)), max + tickAmount * 2, 
+                                         text      = "TPO Count: "     + str.tostring(TP.levelCount.sum ()) 
+                                                   + "\nTick Levels: " + str.tostring(TP.tickLevels.size() - 1)
+                                                   + "\nTop Letter: "  + topLetter,
+                                         xloc      = xloc.bar_time, 
+                                         color     = color.new(chart.fg_color, 92), 
+                                         textcolor = chart.fg_color, 
+                                         size      = tpoLabSize, 
+                                         style     = label.style_text_outline
+                                         )
+
+        VAbox                 := box.new (startTime, getBot, time, getTop, 
+                                         border_color = #00000000, 
+                                         bgcolor      = color.new(vaCol, 95),
+                                         xloc         = xloc.bar_time
+                                         )
+
+        VAline                := line.new(startTime, getBot, startTime, getTop, 
+                                         xloc         = xloc.bar_time, 
+                                         color        = vaCol
+                                         )
+
+
+
+        VAline                := line.new(startTime, getBot, startTime, getTop, 
+                                         xloc         = xloc.bar_time, 
+                                         color        = vaCol
+                                         )
+
+
+        VAlineOutline         := line.new(startTime, getBot, startTime, getTop,
+                                         xloc  = xloc.bar_time, 
+                                         color = color.new(vaCol, 80), 
+                                         width = 5
+                                         )
+
+        IBline                := line.new(timeN1, indexIBS, timeN1, indexIBE, 
+                                         xloc  = xloc.bar_time, 
+                                         color = IBcol
+                                         )
+            
+        IBoutline            := line.new(timeN1, indexIBS, timeN1, indexIBE, 
+                                         xloc  = xloc.bar_time, 
+                                         color = color.new(IBcol, 80), 
+                                         width = 5
+                                         )
+            
+        var keyLevelsLabels = array.new<label>()
+
+        if keyLevelsLabels.size() > 0 
+            for i = 0 to keyLevelsLabels.size() - 1
+                keyLevelsLabels.shift().delete()
+
+        prices = array.from(getBot, getTop, TP.tickLevels.get(math.floor(TP.tickLevels.size() / 2)), startTick)
+        texts  = array.from("VAL", "VAH", "Mid", "IB")
+        colors = array.from(vaCol, vaCol, color.rgb(255, 116, 116), IBcol)
+
+        
+
+        for [i, data] in prices 
+
+            keyLevelsLabels.push(label.new(startTime, data, xloc = xloc.bar_time, 
+                                         text      = texts.get(i) + " ▸",
+                                         color     = #00000000, 
+                                         textcolor = colors.get(i), 
+                                         size      = size.small, 
+                                         style     = label.style_label_right
+                                         ))
+
+
+        if session.islastbar
+
+            TPOdraw             .clear(), sessionLineLower    := na
+            sessionOutlineLower := na   , tpoLab              := na
+            sessionLineUpper    := na   , sessionOutlineUpper := na
+            VAbox               := na   , VAline              := na
+            VAlineOutline       := na   , IBline              := na, 
+            IBoutline           := na   , keyLevelsLabels.clear()
+            
+    if barstate.islast 
+
+        getLabX = label.all.first().get_x()
+            
+        for lines in line.all 
+
+            if lines.get_x1() < getLabX 
+
+                lines.delete()
+
+        for boxes in box.all 
+
+            if boxes.get_left() < getLabX and boxes.get_left() > 100000
+
+                boxes.delete()
+
+TPO()

@@ -1,0 +1,108 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// @ Julien_Eche
+
+//@version=6
+indicator(title="VWAP Adaptive (RelVol-Adjusted)", shorttitle = "VWAP Adaptive", overlay=true, timeframe="", timeframe_gaps=true)
+
+// === VWAP Settings ===
+hideonDWM = input(false, title="Hide VWAP on 1D or Above", group="VWAP Settings", display=display.data_window)
+var anchor = input.string(defval="Session", title="Anchor Period",
+ options=["Session", "Week", "Month", "Quarter", "Year", "Decade", "Century", "Earnings", "Dividends", "Splits"], group="VWAP Settings")
+src = input(title="Source", defval=hlc3, group="VWAP Settings", display=display.data_window)
+offset = input.int(0, title="Offset", group="VWAP Settings", minval=0, display=display.data_window)
+lengthRelVol = input.int(20, title="RelVol Days", minval=1, group="VWAP Settings")
+
+showVWAPClassic = input.bool(false, title="Show VWAP Classic (instead of Adaptive)", group="VWAP Display")
+showVWAPAdaptive = not showVWAPClassic
+
+// === Bands Settings ===
+BANDS_GROUP = "Bands Settings"
+CALC_MODE_TOOLTIP = "Determines the units used to calculate the distance of the bands. When 'Percentage' is selected, a multiplier of 1 means 1%."
+calcModeInput = input.string("Standard Deviation", "Bands Calculation Mode", options=["Standard Deviation", "Percentage"], group=BANDS_GROUP, tooltip=CALC_MODE_TOOLTIP, display=display.data_window)
+bandsSource = showVWAPAdaptive and not showVWAPClassic ? "VWAP Adaptive" : "VWAP Classic"
+showBand_1 = input(true, title="", group=BANDS_GROUP, inline="band_1", display=display.data_window)
+bandMult_1 = input.float(1.0, title="Bands Multiplier #1", group=BANDS_GROUP, inline="band_1", step=0.5, minval=0, display=display.data_window)
+showBand_2 = input(false, title="", group=BANDS_GROUP, inline="band_2", display=display.data_window)
+bandMult_2 = input.float(2.0, title="Bands Multiplier #2", group=BANDS_GROUP, inline="band_2", step=0.5, minval=0, display=display.data_window)
+showBand_3 = input(false, title="", group=BANDS_GROUP, inline="band_3", display=display.data_window)
+bandMult_3 = input.float(3.0, title="Bands Multiplier #3", group=BANDS_GROUP, inline="band_3", step=0.5, minval=0, display=display.data_window)
+
+// === Anchors ===
+new_earnings = request.earnings(syminfo.tickerid, earnings.actual, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+new_dividends = request.dividends(syminfo.tickerid, dividends.gross, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+new_split = request.splits(syminfo.tickerid, splits.denominator, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+
+isNewPeriod = switch anchor
+    "Earnings"  => not na(new_earnings)
+    "Dividends" => not na(new_dividends)
+    "Splits"    => not na(new_split)
+    "Session"   => timeframe.change("D")
+    "Week"      => timeframe.change("W")
+    "Month"     => timeframe.change("M")
+    "Quarter"   => timeframe.change("3M")
+    "Year"      => timeframe.change("12M")
+    "Decade"    => timeframe.change("12M") and year % 10 == 0
+    "Century"   => timeframe.change("12M") and year % 100 == 0
+    => false
+
+isEsdAnchor = anchor == "Earnings" or anchor == "Dividends" or anchor == "Splits"
+if na(src[1]) and not isEsdAnchor
+    isNewPeriod := true
+
+[vwapRef, stdevUpper, _] = ta.vwap(src, isNewPeriod, 1)
+vwapClassic = vwapRef
+
+// === RelVol Calculation ===
+volRefTF = timeframe.period == "1" or timeframe.period == "3" or timeframe.period == "5" ? "1" :
+           timeframe.period == "15" ? "5" :
+           timeframe.period == "30" ? "10" :
+           timeframe.period == "60" ? "15" :
+           timeframe.period == "120" ? "30" :
+           timeframe.period == "180" ? "45" :
+           timeframe.period == "240" ? "60" :
+           timeframe.period == "360" ? "90" :
+           "1"
+
+avgVolPerMinute = request.security(syminfo.tickerid, volRefTF, ta.sma(volume, lengthRelVol))
+relVol = avgVolPerMinute > 0 ? volume / avgVolPerMinute : 1.0
+weightedVol = volume * relVol
+
+var float cumVolAdj = na
+var float cumVolXPriceAdj = na
+if isNewPeriod
+    cumVolAdj := 0.0
+    cumVolXPriceAdj := 0.0
+
+cumVolAdj += weightedVol
+cumVolXPriceAdj += src * weightedVol
+vwapAdaptive = cumVolXPriceAdj / cumVolAdj
+
+// === Bands ===
+bandRef = bandsSource == "VWAP Classic" ? vwapClassic : vwapAdaptive
+stdevAbs = stdevUpper - vwapClassic
+bandBasis = calcModeInput == "Standard Deviation" ? stdevAbs : bandRef * 0.01
+
+upperBandValue1 = bandRef + bandBasis * bandMult_1
+lowerBandValue1 = bandRef - bandBasis * bandMult_1
+upperBandValue2 = bandRef + bandBasis * bandMult_2
+lowerBandValue2 = bandRef - bandBasis * bandMult_2
+upperBandValue3 = bandRef + bandBasis * bandMult_3
+lowerBandValue3 = bandRef - bandBasis * bandMult_3
+
+// === Plots ===
+plot(showVWAPClassic ? vwapClassic : na, title="VWAP Classic", color=color.blue, offset=offset)
+plot(showVWAPAdaptive ? vwapAdaptive : na, title="VWAP Adaptive (RelVol)", color=color.blue, offset=offset)
+
+showBands = (bandsSource == "VWAP Classic" and showVWAPClassic) or (bandsSource == "VWAP Adaptive" and showVWAPAdaptive)
+
+upperBand_1 = plot(showBands and showBand_1 ? upperBandValue1 : na, title="Upper Band #1", color=color.green, offset=offset)
+lowerBand_1 = plot(showBands and showBand_1 ? lowerBandValue1 : na, title="Lower Band #1", color=color.green, offset=offset)
+fill(upperBand_1, lowerBand_1, title="Bands Fill #1", color=color.new(color.green, 95))
+
+upperBand_2 = plot(showBands and showBand_2 ? upperBandValue2 : na, title="Upper Band #2", color=color.olive, offset=offset)
+lowerBand_2 = plot(showBands and showBand_2 ? lowerBandValue2 : na, title="Lower Band #2", color=color.olive, offset=offset)
+fill(upperBand_2, lowerBand_2, title="Bands Fill #2", color=color.new(color.olive, 95))
+
+upperBand_3 = plot(showBands and showBand_3 ? upperBandValue3 : na, title="Upper Band #3", color=color.teal, offset=offset)
+lowerBand_3 = plot(showBands and showBand_3 ? lowerBandValue3 : na, title="Lower Band #3", color=color.teal, offset=offset)
+fill(upperBand_3, lowerBand_3, title="Bands Fill #3", color=color.new(color.teal, 95))
