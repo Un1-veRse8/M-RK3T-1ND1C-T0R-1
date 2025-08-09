@@ -1,0 +1,158 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=6
+indicator("Stop Cascade Detector", overlay=true, max_bars_back=500)
+
+// === INPUTS ===
+momentumLen = input.int(3, "Momentum Lookback", minval=1)
+volSpikeLen = input.int(20, "Volume Spike Lookback", minval=5)
+cascadeZ = input.float(2.0, "Cascade Z-Score Threshold", step=0.1)
+
+// === MOMENTUM & VOLUME Z-SCORES ===
+momentum = close - close[momentumLen]
+momentumAbs = math.abs(momentum)
+momentum_sma = ta.sma(momentumAbs, volSpikeLen)
+momentum_stdev = ta.stdev(momentumAbs, volSpikeLen)
+momentum_z = momentum_stdev != 0 ? (momentumAbs - momentum_sma) / momentum_stdev : 0
+
+vol_sma = ta.sma(volume, volSpikeLen)
+vol_stdev = ta.stdev(volume, volSpikeLen)
+vol_z = vol_stdev != 0 ? (volume - vol_sma) / vol_stdev : 0
+
+// === CASCADE DETECTION ===
+bullCascade = (momentum > 0) and (momentum_z > cascadeZ) and (vol_z > cascadeZ)
+bearCascade = (momentum < 0) and (momentum_z > cascadeZ) and (vol_z > cascadeZ)
+
+var bool inBullCascade = false
+var bool inBearCascade = false
+
+newBullCascade = bullCascade and not inBullCascade
+endBullCascade = not bullCascade and inBullCascade
+
+newBearCascade = bearCascade and not inBearCascade
+endBearCascade = not bearCascade and inBearCascade
+
+if newBullCascade
+    inBullCascade := true
+if endBullCascade
+    inBullCascade := false
+
+if newBearCascade
+    inBearCascade := true
+if endBearCascade
+    inBearCascade := false
+
+// === SMALL SYMBOLS FOR EVENTS ===
+plotshape(newBullCascade, style=shape.triangledown, location=location.abovebar, color=color.rgb(255, 82, 82, 20), size=size.small, title="Bull Stop Cascade")
+plotshape(newBearCascade, style=shape.triangleup, location=location.belowbar, color=color.rgb(76, 175, 79, 20), size=size.small, title="Bear Stop Cascade")
+
+bgcolor(bullCascade ? color.new(color.green, 85) : bearCascade ? color.new(color.red, 85) : na, title="Stop Cascade Highlight")
+
+// === EVENT STORAGE ===
+varip eventArr         = array.new_string(0)
+varip eventStrengthArr = array.new_float(0)
+varip eventVolArr      = array.new_float(0)
+varip eventAvgVolArr   = array.new_float(0)  // <--- NEW
+varip eventTimeArr     = array.new_int(0)
+varip eventMZArr       = array.new_float(0)
+varip eventVZArr       = array.new_float(0)
+varip bool lastEventActive = false
+varip string lastEventDir = ""
+varip int lastEventTime = na
+
+maxEvents = 5 // Show last 5 events
+
+// === EVENT LOGIC ===
+avgVol = ta.sma(volume, 20)  // Calculate average volume ONCE per bar
+
+if newBullCascade or newBearCascade
+    dir = newBullCascade ? "BULL" : "BEAR"
+    eventStrength = math.abs(momentum_z) + math.abs(vol_z)
+    eventTime = time
+    eventVol = volume
+    eventMZ = momentum_z
+    eventVZ = vol_z
+    // --- Check for duplicate timestamp ---
+    lastLoggedTime = array.size(eventTimeArr) > 0 ? array.get(eventTimeArr, 0) : na
+    if na(lastLoggedTime) or eventTime != lastLoggedTime
+        array.unshift(eventArr, dir)
+        array.unshift(eventStrengthArr, eventStrength)
+        array.unshift(eventVolArr, eventVol)
+        array.unshift(eventAvgVolArr, avgVol)
+        array.unshift(eventTimeArr, eventTime)
+        array.unshift(eventMZArr, eventMZ)
+        array.unshift(eventVZArr, eventVZ)
+        if array.size(eventArr) > maxEvents
+            array.pop(eventArr)
+            array.pop(eventStrengthArr)
+            array.pop(eventVolArr)
+            array.pop(eventAvgVolArr)
+            array.pop(eventTimeArr)
+            array.pop(eventMZArr)
+            array.pop(eventVZArr)
+        lastEventActive := true
+        lastEventDir := dir
+        lastEventTime := eventTime
+// If cascade is still active, update the most recent entry
+else if (bullCascade or bearCascade) and lastEventActive and array.size(eventArr) > 0
+    dir = bullCascade ? "BULL" : "BEAR"
+    if dir == lastEventDir
+        eventStrength = math.abs(momentum_z) + math.abs(vol_z)
+        eventTime = time
+        eventVol = volume
+        eventMZ = momentum_z
+        eventVZ = vol_z
+        array.set(eventStrengthArr, 0, eventStrength)
+        array.set(eventVolArr, 0, eventVol)
+        array.set(eventAvgVolArr, 0, avgVol)   // <--- UPDATE avgVol
+        array.set(eventTimeArr, 0, eventTime)
+        array.set(eventMZArr, 0, eventMZ)
+        array.set(eventVZArr, 0, eventVZ)
+    else
+        lastEventActive := false
+
+// --- Gauge Bar Scaling Parameters ---
+maxStrength = 8.0  // You can adjust this to fit your typical eventStrength range
+
+var table dash = na
+if na(dash)
+    dash := table.new(position.bottom_right, 6, maxEvents+2, bgcolor=color.new(color.black, 90), border_color=color.new(color.purple, 80), border_width=1)
+table.clear(dash, 0, 0)
+// Centered branding/header row (merged across all 6 columns)
+table.cell(dash, 0, 0, "⚡ Dskyz (DAFE) Trading Systems", text_color=color.rgb(200, 200, 255), text_size=size.normal, bgcolor=color.new(color.black, 90))
+table.merge_cells(dash, 0, 0, 5, 0)
+// Header row
+table.cell(dash, 0, 1, "Event", text_color=color.silver, text_size=size.small)
+table.cell(dash, 1, 1, "Time", text_color=color.silver, text_size=size.small)
+table.cell(dash, 2, 1, "MZ", text_color=color.silver, text_size=size.small)
+table.cell(dash, 3, 1, "VZ", text_color=color.silver, text_size=size.small)
+table.cell(dash, 4, 1, "Vol xAvg", text_color=color.silver, text_size=size.small)
+table.cell(dash, 5, 1, "Strength", text_color=color.silver, text_size=size.small)
+
+if array.size(eventArr) > 0
+    for i = 0 to array.size(eventArr)-1
+        dir = array.get(eventArr, i)
+        t = array.get(eventTimeArr, i)
+        v = array.get(eventVolArr, i)
+        avgV = array.get(eventAvgVolArr, i)
+        s = array.get(eventStrengthArr, i)
+        mz = array.get(eventMZArr, i)
+        vz = array.get(eventVZArr, i)
+        // Format time (convert UNIX ms to readable time)
+        tstr = str.format("{0,time,HH:mm}", t)
+        // Volume multiple
+        vstr = str.tostring(v / avgV, "#.2f") + "x"
+        // Gauge bar
+        bar_length = 10
+        full_bars = math.round(math.min(s / maxStrength, 1) * bar_length)
+        empty_bars = bar_length - full_bars
+        bar_str = str.repeat("█", full_bars) + str.repeat("░", empty_bars)
+        // Color: green = mild, orange = medium, red = extreme
+        bar_color = s > maxStrength ? color.red : s > (maxStrength * 0.625) ? color.orange : color.green
+        table.cell(dash, 0, i+2, dir, text_color=dir=="BULL"?color.green:color.red, text_size=size.small)
+        table.cell(dash, 1, i+2, tstr, text_color=color.silver, text_size=size.small)
+        table.cell(dash, 2, i+2, str.tostring(mz, "#.2x"), text_color=color.yellow, text_size=size.small)
+        table.cell(dash, 3, i+2, str.tostring(vz, "#.2x"), text_color=color.aqua, text_size=size.small)
+        table.cell(dash, 4, i+2, vstr, text_color=color.aqua, text_size=size.small)
+        table.cell(dash, 5, i+2, bar_str, text_color=bar_color, text_size=size.small)

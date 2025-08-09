@@ -1,0 +1,131 @@
+//@version=5
+// -----------------------------------------------------------------------------
+// Indicator: Range Expansion Index (REI)
+// Author:    TradeQUO, based on the original work of Thomas DeMark
+// Date:      June 9, 2025
+// -----------------------------------------------------------------------------
+// Description:
+// This indicator calculates and displays the Range Expansion Index (REI), an
+// oscillator developed by market technician Thomas DeMark. Its primary purpose
+// is to identify overbought and oversold conditions in the market, which can
+// signal potential trend reversals.
+//
+// The indicator oscillates between -100 and +100.
+// - Values approaching +100 suggest an overbought market.
+// - Values approaching -100 suggest an oversold market.
+//
+// Signals:
+// A red up-arrow (Buy Signal) appears when the REI has been below the
+// 'Oversold' line for a specified number of bars ('Signal Duration').
+//
+// A green down-arrow (Sell Signal) appears when the REI has been above the
+// 'Overbought' line for the 'Signal Duration'.
+// -----------------------------------------------------------------------------
+
+indicator("Range Expansion Index (REI)", shorttitle="REI by TradeQUO", timeframe="", overlay=false, precision=2)
+
+// =============================================================================
+//                                  INPUTS
+// =============================================================================
+
+// -- Data Sources --
+src_HC = input.source(high, title="Data for High Comparison (X_HC)")
+src_LC = input.source(low, title="Data for Low Comparison (X_LC)")
+
+// -- Lengths and Duration --
+n = input.int(14, title="REI Length (n)", minval=1)
+nL1 = input.int(2, title="Lookback Length 1 (nL1)", minval=1)
+nL2 = input.int(2, title="Lookback Length 2 (nL2)", minval=1)
+nL3 = input.int(2, title="Lookback Length 3 (nL3)", minval=1)
+nD = input.int(3, title="Signal Duration (nD)", minval=1)
+
+// -- Calculation Settings --
+string group_calc = "Calculation Settings"
+calcMethod = input.string("Advanced", title="Calculation Method", options=["Basic", "Advanced"], group=group_calc)
+useStrict = input.bool(true, title="Use Strict Inequalities? (Advanced Only)", group=group_calc)
+
+// -- Levels and Signals --
+string group_levels = "Levels and Signals"
+obLevel = input.float(60.0, title="Overbought Level (positive)", group=group_levels)
+osLevel = input.float(-60.0, title="Oversold Level (negative)", group=group_levels)
+arrowOffsetPercent = input.float(5.0, title="Arrow Offset (%)", minval=0, group=group_levels)
+
+
+// =============================================================================
+//                             CALCULATION LOGIC
+// =============================================================================
+
+// -- Helper variable for the calculation method --
+bool isAdvanced = calcMethod == "Advanced"
+
+// -- Condition 1 (C1) --
+bool cond1_ge = (high >= src_HC[nL2] or high >= src_HC[nL2 + 1]) and (low <= src_LC[nL2] or low <= src_LC[nL2 + 1])
+bool cond1_gt = (high >  src_HC[nL2] or high >  src_HC[nL2 + 1]) and (low <  src_LC[nL2] or low <  src_LC[nL2 + 1])
+bool c1 = isAdvanced and useStrict ? cond1_gt : cond1_ge
+
+// -- Condition 2 (C2) --
+bool cond2_ge = (high[nL1] >= close[nL3] or high[nL1] >= close[nL3 + 1]) and (low[nL1] <= close[nL3] or low[nL1] <= close[nL3 + 1])
+bool cond2_gt = (high[nL1] >  close[nL3] or high[nL1] >  close[nL3 + 1]) and (low[nL1] <  close[nL3] or low[nL1] <  close[nL3 + 1])
+bool c2 = isAdvanced and useStrict ? cond2_gt : cond2_ge
+
+// -- Conditional Multiplier (v_t) --
+float vt = (c1 or c2) ? 1.0 : 0.0
+
+// -- REI Formula --
+// Numerator:   Sum over n of (v_t * (H_i - H_i-nL1 + L_i - L_i-nL1))
+// Denominator: Sum over n of (|H_i - H_i-nL1| + |L_i - L_i-nL1|)
+// REI = 100 * (Numerator / Denominator)
+
+float price_change = (high - high[nL1]) + (low - low[nL1])
+float abs_price_change = math.abs(high - high[nL1]) + math.abs(low - low[nL1])
+
+float numerator_term = vt * price_change
+float numerator = math.sum(numerator_term, n)
+float denominator = math.sum(abs_price_change, n)
+
+float rei = denominator == 0 ? 0 : 100 * (numerator / denominator)
+
+// =============================================================================
+//                          ARROW SIGNAL LOGIC
+// =============================================================================
+
+// Counts the consecutive bars above/below the levels
+var int bars_above_ob = 0
+var int bars_below_os = 0
+
+bars_above_ob := rei > obLevel ? nz(bars_above_ob[1]) + 1 : 0
+bars_below_os := rei < osLevel ? nz(bars_below_os[1]) + 1 : 0
+
+// Signal is generated when the duration (nD) is met exactly
+bool sell_condition = bars_above_ob == nD
+bool buy_condition = bars_below_os == nD
+
+
+// =============================================================================
+//                             PLOTS AND VISUALS
+// =============================================================================
+
+// -- Lines --
+plot(series=rei, title="REI", color=color.new(color.teal, 0), linewidth=2)
+hline(0, "Zero Line", color.new(color.gray, 50), hline.style_dotted)
+
+hline_ob = hline(obLevel, "Overbought", color.new(color.red, 50), hline.style_dashed)
+hline_os = hline(osLevel, "Oversold", color.new(color.green, 50), hline.style_dashed)
+
+fill(hline_ob, hline_os, color=color.new(color.teal, 92), title="OB/OS Zone")
+
+// -- Arrows --
+// The vertical position is calculated according to the formula: REI + (k/100 * REI)
+float y_pos_offset = rei * (arrowOffsetPercent / 100.0)
+float y_pos = rei + y_pos_offset
+
+// We create a series for the Y-position of the arrows.
+// The series only has a value when the condition is true, otherwise it is 'na'.
+float buy_signal_y_pos = buy_condition ? y_pos : na
+float sell_signal_y_pos = sell_condition ? y_pos : na
+
+// Green down-arrow for Sell Signal
+plotshape(series=sell_signal_y_pos, title="Sell Signal", style=shape.arrowdown, location=location.absolute, color=color.new(color.green, 0), size=size.small)
+
+// Red up-arrow for Buy Signal
+plotshape(series=buy_signal_y_pos, title="Buy Signal", style=shape.arrowup, location=location.absolute, color=color.new(color.red, 0), size=size.small)

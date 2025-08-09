@@ -1,0 +1,177 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © fluxchart
+
+//@version=6
+indicator("SuperTrend + Relative Volume (Kernel Optimized) | Flux Charts", max_labels_count = 500, overlay = true)
+import TradingView/ta/9 as ta
+
+//constants
+const bool DEBUG = false
+const int KDELimit = 300
+
+//Supertrend Inputs
+atrLength = input.int(10, title = "ATR Length", group = "SuperTrend")
+atrMultiplier = input.int(3, title = "ATR Multiplier", group = "SuperTrend")
+supertrend_max_opacity = input.int(99, minval = 0, maxval = 100, title = "SuperTrend Max Opacity", group = "SuperTrend", tooltip = "This setting sets the opacity of supertrend based on the KDE%. A higher value will increase the transparency.")
+supertrend_min_opacity = input.int(53, minval = 0, maxval = 100, title = "SuperTrend Min Opacity", group = "SuperTrend", tooltip = "This setting sets the opacity of supertrend based on the KDE%. A lower value will decrease the transparency.")
+
+//KDE inputs
+string KDEKernel = "Gaussian"           //common kernel for normal distribution
+float KDEBandwidth = input.float(0.10, "Bandwidth", minval = 0.01, step = 0.1, group = "KDE", tooltip = "This setting sets the smoothness of the KDE function output.")
+int KDEStep = input.int(200, "Nº Bins", minval = 1, group = "KDE", tooltip = "The number of elements the KDE Probability array will have. Higher settings will result in greater precision.")
+float activationThreshold = input.float(30, "KDE Threshold %", minval = 0, maxval = 100, step = 2.50, group = "KDE", tooltip = "This setting sets the KDE% threshold that must be exceeeded to indicate buy or sell signals.")
+int barLength = input.int(50, "Relative Volume Length", minval = 1, group = "KDE", tooltip = "This setting sets the number of candles back to calculate Relative Breakout Volume")
+string probMode = "Sum"    
+activationThreshold:= activationThreshold/100     
+activationThresholdEnabled = input.bool(false, "Enable Activation Threshold", group = "KDE")
+
+//Style Inputs
+bearishColor = input.color(#f23646, "Bullish Break", group = "Style", inline = "col")
+bullishColor = input.color(color.rgb(9, 209, 66), "Bearish Break", group = "Style", inline = "col")
+textColor = input.color(color.white, 'Text', group = 'Style', inline = "col", display = display.none)
+KDELabelsEnabled = input.bool(true, "KDE Labels", group = "Style")
+
+//Gaussian Kernel Function
+gaussian (float distance, float bandwidth = 1.0) => 1.0 / math.sqrt(2.0 * math.pi) * math.pow(math.e, -0.5 * math.pow(distance / bandwidth, 2.0))
+
+//KDE Probability
+var float volumeProb = na      
+float maxVolumeProb = na        
+
+kde (array<float> arr, string kernel, float bandwidth, int steps) =>
+    arrSize = arr.size()
+    arrMax = 3  //99.7% of values fall between -3 and 3
+    arrMin = -3
+    arrRange = arrMax - arrMin 
+    stepCount = arrRange / steps
+    
+    densityRange = array.new<float>(steps)          //calculate values to apply the kernel estimate
+    for i = 0 to (steps) - 1
+        densityRange.set(i, arrMin + i * stepCount)
+    
+    xArr = array.new<float>()
+    yArr = array.new<float>()
+    for i = 0 to densityRange.size() - 1
+        float temp = 0
+        for j = 0 to arr.size() - 1
+            temp += gaussian(densityRange.get(i) - arr.get(j), bandwidth)
+        xArr.push(densityRange.get(i))
+        yArr.push(temp)
+    totalDensity = array.sum(yArr)
+    for k= 0 to yArr.size() - 1
+        yArr.set(k, yArr.get(k) / totalDensity)  // Normalize each density value
+    [xArr, yArr]
+//#endregion
+
+//Supertrend
+[Pine_Supertrend, pineDirection] = ta.supertrend(atrMultiplier, atrLength)
+
+//Breaks in Trend
+bullishBreak = ta.crossover(close, Pine_Supertrend) 
+bearishBreak = ta.crossunder(close, Pine_Supertrend)
+
+//Candle Data
+var volumeOnBreak = array.new<float>()
+var normalizedVolumeOnBreak = array.new<float>()
+
+//KDE variables
+float MidKDEVol = na
+var array<float> KDEVolX = na   //array of volume points
+var array<float> KDEVolY = na   //density estimate at the corresponding volume point
+var array<float> KDEVolYSum = array.new<float>()
+
+//Calculate Relative Volume
+getRelativeVolume(cur) =>
+    float temp = 0
+    int count = 0
+    for i = 1 to barLength
+        if(not na(volume[i]))
+            temp += volume[i]
+            count += 1
+    temp := count > 0 ? temp / count : na 
+    rvol = temp > 0 ? cur / temp : na
+    rvol   
+
+//Updates KDE Array and density points
+if(not na(volume) and (bullishBreak or bearishBreak) and bar_index<(5000-barLength))
+    if(volumeOnBreak.size() > KDELimit)
+        volumeOnBreak.remove(0)
+    volumeOnBreak.push(getRelativeVolume(volume))
+
+    normalizedVolumeOnBreak := array.standardize(volumeOnBreak) //normalized array
+    [KDEVolX1, KDEVolY1] = kde(normalizedVolumeOnBreak, KDEKernel, KDEBandwidth, KDEStep)
+    KDEVolX := KDEVolX1     
+    KDEVolY := KDEVolY1
+    KDEVolYSum.clear()
+
+    temp = 0.0
+    for i = 0 to KDEVolY.size() - 1
+        temp += KDEVolY.get(i)
+        KDEVolYSum.push(temp)
+    MidKDEVol := array.get(KDEVolX, array.indexof(KDEVolY, array.max(KDEVolY)))
+
+prefixSum (array<float> arr, int l, int r) =>
+    arr.get(r) - (l == 0 ? 0 : arr.get(l - 1))
+
+//Standardize param: val based on param arr
+standardize(float val, array<float> arr) =>    
+    meanValue = array.avg(arr)        
+    stdDevArr = array.stdev(arr)   
+    stdVal = (val-meanValue)/stdDevArr
+    stdVal                                     
+
+getSupertrendTransparency(KDEProb) =>
+    newValue = (KDEProb*(supertrend_max_opacity - supertrend_min_opacity)) + supertrend_min_opacity
+    newValue := supertrend_max_opacity - newValue + supertrend_min_opacity
+    newValue
+
+//Finds Estimated Density Value
+//if ((bearishBreak or bullishBreak) and not na(volume))
+if(not na(volume))
+    vol = standardize(getRelativeVolume(volume), volumeOnBreak)
+    if volumeOnBreak.size() > 0
+        volXIndexL = array.binary_search_leftmost(KDEVolX, vol )
+        volXIndexR = math.min(array.binary_search_rightmost(KDEVolX, vol), KDEVolX.size() - 1)
+        nearestIndex = (math.abs(vol - KDEVolX.get(volXIndexL)) < math.abs(vol - KDEVolX.get(volXIndexR))) ? volXIndexL : volXIndexR
+        if probMode == "Nearest"
+            volumeProb := KDEVolY.get(nearestIndex)
+            maxVolumeProb := array.max(KDEVolY)
+        else if probMode == "Sum"
+            volumeProb := prefixSum(KDEVolYSum, 0, nearestIndex)
+//#endregion   
+
+overKDEThreshold(KDEprob) =>
+    if(activationThresholdEnabled == false)
+        true
+    else if((KDEprob >= activationThreshold))
+        true
+    else if((KDEprob < activationThreshold))
+        false
+    
+//Table
+var table table = table.new(position=position.top_right, columns=1, rows=1)
+if (na(volume) or volume == 0)
+    table.cell(table, row=0, column=0, text="⚠️ No Volume Data Available for " + syminfo.tickerid, text_color=color.white, bgcolor=color.red)
+else
+    //table.cell(table, row=0, column=0, text = "Relative Volume KDE: "+ str.tostring(volumeProb * 100, "#.#") + "%", text_color = color.white, bgcolor = color.new(color.blue, 60))
+    table.clear(table, 0, 0) 
+ 
+upTrend = plot(pineDirection < 0 ? Pine_Supertrend : na, "Up direction", color.new(bullishColor, getSupertrendTransparency(volumeProb)), style=plot.style_linebr)
+downTrend = plot(pineDirection > 0 ? Pine_Supertrend : na, "Down direction", color.new(bearishColor, getSupertrendTransparency(volumeProb)), style=plot.style_linebr)
+bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle",display = display.none)
+fill(bodyMiddle, upTrend, color.new(bullishColor, getSupertrendTransparency(volumeProb)), fillgaps = false)
+fill(bodyMiddle, downTrend, color.new(bearishColor, getSupertrendTransparency(volumeProb)), fillgaps = false)
+
+plotshape((bullishBreak and not na(volume) and overKDEThreshold(volumeProb)) ? Pine_Supertrend*0.999 : na, "Bullish Arrows", style = shape.arrowup, size = size.normal, location = location.absolute, color = bullishColor, force_overlay = true)
+plotshape((bearishBreak and not na(volume) and overKDEThreshold(volumeProb)) ? Pine_Supertrend*1.001 : na, "Bearish Arrows", style = shape.arrowdown, size = size.normal, location = location.absolute, color = bearishColor, force_overlay = true)
+
+alertcondition(not na(volume) and bullishBreak and overKDEThreshold(volumeProb) and barstate.isconfirmed, "Possible Bullish Trend")
+alertcondition(not na(volume) and bearishBreak and overKDEThreshold(volumeProb) and barstate.isconfirmed, "Possible Bearish Trend")
+
+if not na(volume) and overKDEThreshold(volumeProb) and KDELabelsEnabled 
+    txt = ""
+    txt := "Vol: " + str.tostring(volumeProb * 100, "#.#") + "%"
+    if bullishBreak
+        label.new(bar_index, y = Pine_Supertrend*0.999, text = txt, yloc = yloc.price, color = color.new(color.blue, 100), style = label.style_label_up, textcolor = textColor, force_overlay = true)
+    if bearishBreak
+        label.new(bar_index, y = Pine_Supertrend*1.001, text = txt, yloc = yloc.price, color = color.new(color.blue, 100), style = label.style_label_down, textcolor = textColor, force_overlay = true)

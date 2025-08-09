@@ -1,0 +1,232 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Reflexivity Resonance Factor (RRF) - Quantum Flow", overlay=false, precision=3)
+
+// ========================================
+// INPUT PARAMETERS
+// ========================================
+
+// Core Settings
+group_core = "🧬 Core Parameters"
+pp_roc_len = input.int(14, "Perception Period", minval=1, group=group_core, tooltip="Measures the rate of price change to gauge market perception.\n\n• Lower values (5-10): More responsive, good for scalping on 1-5min charts\n• Default (14): Balanced for 15min-1hr charts\n• Higher values (20-30): Smoother signals for 4hr-daily charts\n\nThis captures how quickly market participants are changing their view.")
+
+pp_smooth_len = input.int(7, "Perception Smooth", minval=1, group=group_core, tooltip="Smooths the perception signal to reduce noise.\n\n• Lower values (3-5): Keeps more detail, faster signals\n• Default (7): Good balance of smoothness and responsiveness\n• Higher values (10-15): Very smooth, may lag slightly\n\nAdjust based on market volatility - increase in choppy markets.")
+
+prp_fast_len = input.int(7, "Participation Fast", minval=1, group=group_core, tooltip="Fast ATR period for measuring immediate market participation.\n\n• Scalping (1-5min): Use 5-7\n• Day Trading (15min-1hr): Use 7-10\n• Swing Trading (4hr+): Use 10-14\n\nThis captures short-term volatility expansion/contraction.")
+
+prp_slow_len = input.int(21, "Participation Slow", minval=2, group=group_core, tooltip="Slow ATR period for baseline market participation.\n\n• Should be 2-4x the fast period\n• Default (21): Works well with fast=7\n• Increase for more stable signals\n\nThe ratio between fast/slow ATR indicates volatility regime changes.")
+
+// Signal Settings
+group_signal = "⚡ Signal Configuration"
+res_z_window = input.int(50, "Resonance Window", minval=10, group=group_signal, tooltip="Lookback period for Z-score normalization.\n\n• Shorter (20-30): More reactive to recent changes\n• Default (50): Captures medium-term context\n• Longer (100+): More stable, fewer false signals\n\nThis determines how 'unusual' current resonance is compared to recent history.")
+
+rrf_threshold = input.float(1.5, "Primary Threshold", minval=0.5, step=0.1, group=group_signal, tooltip="Z-score level that triggers 'Active' resonance.\n\n• Lower (1.0-1.5): More signals, earlier entries\n• Default (1.5): Balanced sensitivity\n• Higher (2.0+): Only strong signals\n\nWhen resonance exceeds this, market reflexivity is significant.")
+
+rrf_extreme = input.float(2.5, "Extreme Threshold", minval=1.0, step=0.1, group=group_signal, tooltip="Z-score level for extreme resonance conditions.\n\n• Default (2.5): Captures major regime shifts\n• Higher (3.0+): Only the most extreme events\n\nExtreme resonance often precedes significant market moves or reversals.")
+
+regime_window = input.int(100, "Regime Window", minval=20, group=group_signal, tooltip="Period for calculating regime strength percentage.\n\n• Counts how many resonance spikes occurred recently\n• Higher values = more context, slower to change\n• Lower values = adapts quickly to new regimes\n\nRegime >30% suggests active reflexive market conditions.")
+
+// Visual Settings
+group_visual = "🎨 Visual Settings"
+show_flow = input.bool(true, "Show Resonance Flow", group=group_visual, tooltip="Displays the main resonance line with glow effects.\n\nThe multi-layered visualization creates depth and makes signal strength more intuitive.")
+
+show_particles = input.bool(true, "Show Signal Particles", group=group_visual, tooltip="Shows circular markers at active and extreme resonance points.\n\nHelps identify exact trigger points for potential trades.")
+
+show_energy = input.bool(true, "Show Energy Field", group=group_visual, tooltip="Colors the background based on resonance energy.\n\nDarker background = higher energy = stronger reflexivity in the market.")
+
+show_dashboard = input.bool(true, "Show Info Dashboard", group=group_visual, tooltip="Displays the status panel with resonance metrics.\n\nShows current status, resonance value, energy level, and regime strength.")
+
+show_guide = input.bool(true, "Show Trading Guide", group=group_visual, tooltip="Shows the trading guide in bottom right.\n\nQuick reference for interpreting signals and understanding market states.")
+
+color_mode = input.string("Spectrum", "Color Mode", options=["Spectrum", "Heat", "Ocean", "Plasma"], group=group_visual, tooltip="Visual theme for the indicator.\n\n• Spectrum: Cyan→Magenta (high contrast)\n• Heat: Yellow→Red (traditional heat map)\n• Ocean: Blue gradients (easy on eyes)\n• Plasma: Orange→Purple (vibrant)")
+
+// ========================================
+// CALCULATIONS
+// ========================================
+
+// Perception Proxy - Market's self-awareness
+roc_val = ta.roc(close, pp_roc_len)
+perception = ta.ema(roc_val, pp_smooth_len)
+
+// Participation Proxy - Market's reaction intensity
+fast_atr = ta.atr(prp_fast_len)
+slow_atr = ta.atr(prp_slow_len)
+participation = slow_atr > 0 ? fast_atr / slow_atr : 1.0
+
+// Reflexivity Core - The feedback loop
+reflexivity = perception * participation
+
+// Resonance Detection
+resonance_raw = ta.ema(math.abs(reflexivity), 3)
+resonance_avg = ta.sma(resonance_raw, res_z_window)
+resonance_std = ta.stdev(resonance_raw, res_z_window)
+resonance = resonance_std > 0 ? (resonance_raw - resonance_avg) / resonance_std : 0
+
+// Smooth resonance for visual appeal
+resonance_smooth = ta.ema(resonance, 2)
+
+// Energy calculation (0-100 scale)
+energy = math.min(100, math.max(0, (math.abs(resonance_smooth) / rrf_extreme) * 100))
+
+// Regime strength
+spike_detected = math.abs(resonance) > rrf_threshold ? 1 : 0
+regime_strength = math.sum(spike_detected, regime_window) / regime_window * 100
+
+// Signal states
+is_building = resonance_smooth > 0.5 and resonance_smooth < rrf_threshold
+is_active = math.abs(resonance_smooth) > rrf_threshold
+is_extreme = math.abs(resonance_smooth) > rrf_extreme
+signal_direction = resonance_smooth > 0 ? 1 : -1
+
+// ========================================
+// COLOR SCHEMES (ORIGINAL VIBRANT COLORS)
+// ========================================
+
+// Dynamic color based on resonance intensity and direction
+get_spectrum_color(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#00ffff, 20), color.new(#ff00ff, 0))
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#00ff00, 20), color.new(#ff0066, 0))
+
+get_heat_color(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#ffff00, 20), color.new(#ff0000, 0))
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#0066ff, 20), color.new(#9900ff, 0))
+
+get_ocean_color(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#00ccff, 20), color.new(#0044aa, 0))
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#00ffcc, 20), color.new(#006644, 0))
+
+get_plasma_color(value, direction) =>
+    intensity = math.min(100, math.abs(value * 40))
+    if direction > 0
+        color.from_gradient(intensity, 0, 100, color.new(#ffcc00, 20), color.new(#ff0099, 0))
+    else
+        color.from_gradient(intensity, 0, 100, color.new(#cc00ff, 20), color.new(#0099ff, 0))
+
+// Select color based on mode
+base_color = switch color_mode
+    "Spectrum" => get_spectrum_color(resonance_smooth, signal_direction)
+    "Heat" => get_heat_color(resonance_smooth, signal_direction)
+    "Ocean" => get_ocean_color(resonance_smooth, signal_direction)
+    "Plasma" => get_plasma_color(resonance_smooth, signal_direction)
+
+// ========================================
+// VISUALIZATION
+// ========================================
+
+// Background energy field
+bg_alpha = show_energy ? math.min(90, 95 - energy * 0.7) : 100
+bgcolor(show_energy ? color.new(base_color, bg_alpha) : na)
+
+// Zero line with glow effect
+hline(0, "Equilibrium", color=color.new(color.gray, 80), linewidth=1)
+
+// Threshold zones
+th1 = hline(rrf_threshold, "Active Zone", color=color.new(color.white, 95), linewidth=1, linestyle=hline.style_dotted)
+th2 = hline(-rrf_threshold, "Active Zone", color=color.new(color.white, 95), linewidth=1, linestyle=hline.style_dotted)
+th3 = hline(rrf_extreme, "Extreme Zone", color=color.new(color.white, 90), linewidth=1, linestyle=hline.style_dotted)
+th4 = hline(-rrf_extreme, "Extreme Zone", color=color.new(color.white, 90), linewidth=1, linestyle=hline.style_dotted)
+
+// Fill threshold zones
+fill(th1, th3, color=color.new(base_color, 95), title="Upper Resonance Zone")
+fill(th2, th4, color=color.new(base_color, 95), title="Lower Resonance Zone")
+
+// Main resonance flow
+plot(show_flow ? resonance_smooth : na, "Resonance Core", color=base_color, linewidth=3)
+plot(show_flow ? resonance_smooth : na, "Resonance Glow", color=color.new(base_color, 30), linewidth=6, style=plot.style_line)
+plot(show_flow ? resonance_smooth : na, "Resonance Aura", color=color.new(base_color, 60), linewidth=10, style=plot.style_line)
+
+// Signal particles
+plotshape(show_particles and is_extreme ? resonance_smooth : na, "Extreme Particle", style=shape.circle, location=location.absolute, color=color.new(base_color, 0), size=size.small)
+plotshape(show_particles and is_active and not is_extreme ? resonance_smooth : na, "Active Particle", style=shape.circle, location=location.absolute, color=color.new(base_color, 20), size=size.tiny)
+
+// ========================================
+// INFORMATION DISPLAY (ONLY IF ENABLED)
+// ========================================
+
+// Create info box - back to top_right with spacer at top
+var table info_box = table.new(position.top_right, 1, 5, bgcolor=color.new(#000000, 85), border_color=color.new(base_color, 50), border_width=1)
+
+if barstate.islast and show_dashboard
+    // Top spacer to avoid window buttons
+    table.cell(info_box, 0, 0, "", text_size=size.tiny)
+    
+    // Status indicator
+    status_text = is_extreme ? "⚡ EXTREME RESONANCE" : is_active ? "🔥 ACTIVE RESONANCE" : is_building ? "🌊 BUILDING..." : "💤 DORMANT"
+    status_color = is_extreme ? base_color : is_active ? color.new(base_color, 20) : is_building ? color.new(base_color, 50) : color.gray
+    
+    table.cell(info_box, 0, 1, status_text, text_color=status_color, text_size=size.normal, text_halign=text.align_center)
+    
+    // Resonance value with visual bar using consistent characters
+    res_value = math.round(resonance_smooth * 100) / 100
+    res_text = "Resonance: " + str.tostring(res_value, "#.##")
+    
+    // Create visual bar using consistent width characters
+    bar_length = math.min(20, math.max(0, math.round(math.abs(resonance_smooth) * 10)))
+    bar_blocks = ""
+    for i = 1 to 20
+        bar_blocks := bar_blocks + (i <= bar_length ? "■" : "□")
+    
+    table.cell(info_box, 0, 2, res_text + "\n" + bar_blocks, text_color=color.white, text_size=size.small, text_halign=text.align_left, text_font_family=font.family_monospace)
+    
+    // Energy meter with consistent display
+    energy_int = math.round(energy)
+    energy_text = "Energy: " + str.tostring(energy_int, "#") + "%"
+    
+    // Create energy bar using same consistent characters
+    energy_blocks = math.min(20, math.max(0, math.round(energy / 5)))
+    energy_bar = ""
+    for i = 1 to 20
+        energy_bar := energy_bar + (i <= energy_blocks ? "■" : "□")
+    
+    table.cell(info_box, 0, 3, energy_text + "\n" + energy_bar, text_color=base_color, text_size=size.small, text_halign=text.align_left, text_font_family=font.family_monospace)
+    
+    // Regime strength
+    regime_text = "Regime: " + str.tostring(math.round(regime_strength), "#") + "%"
+    regime_color = regime_strength > 50 ? color.new(#00ff00, 0) : regime_strength > 25 ? color.new(#ffff00, 0) : color.new(#ff0000, 0)
+    
+    table.cell(info_box, 0, 4, regime_text, text_color=regime_color, text_size=size.small, text_halign=text.align_center)
+
+// Clear dashboard if disabled
+if not show_dashboard and barstate.islast
+    table.clear(info_box, 0, 0, 0, 4)
+
+// ========================================
+// TRADING GUIDE (ONLY IF ENABLED)
+// ========================================
+
+var table guide = table.new(position.bottom_left, 1, 1, bgcolor=color.new(#000000, 90), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast and show_guide
+    guide_text = "🎯 RRF Trading Guide:\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "💤 DORMANT = Market equilibrium\n" +
+                 "🌊 BUILDING = Prepare for move\n" +
+                 "🔥 ACTIVE = Consider entry\n" + 
+                 "⚡ EXTREME = Major shift likely\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "📊 Energy >70% = High conviction\n" +
+                 "📈 Above 0 = Bullish reflexivity\n" +
+                 "📉 Below 0 = Bearish reflexivity\n" +
+                 "━━━━━━━━━━━━━━━━━━━━\n" +
+                 "🎨 Brighter = Stronger signal"
+    
+    table.cell(guide, 0, 0, guide_text, text_color=color.new(color.white, 20), text_size=size.tiny, text_halign=text.align_left, text_font_family=font.family_monospace)
+
+// ========================================
+// ALERTS
+// ========================================
+
+alertcondition(is_active and not is_active[1], "RRF Activation", "Reflexivity Resonance Activated")
+alertcondition(is_extreme and not is_extreme[1], "RRF Extreme", "Extreme Reflexivity Resonance Detected")
+alertcondition(not is_active and is_active[1], "RRF Deactivation", "Reflexivity Resonance Deactivated")

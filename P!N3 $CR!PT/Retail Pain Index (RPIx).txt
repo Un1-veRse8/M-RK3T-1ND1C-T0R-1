@@ -1,0 +1,52 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=6
+indicator("Retail Pain Index (RPIx)", overlay=false, max_bars_back=500)
+
+// === USER INPUTS ===
+lookback = input.int(30, "Entry Cluster Lookback")
+painZ = input.float(2.0, "Pain Z-Score Threshold")
+showDashboard = input.bool(true, "Show Dashboard")
+showInfoLabel = input.bool(true, "Show Compact Info Label")
+
+// === CORE CALCULATION ===
+vwap = ta.vwap
+entry_zone = ta.sma(vwap, lookback)
+distance = math.abs(close - entry_zone)
+dist_sma = ta.sma(distance, lookback)
+dist_stdev = ta.stdev(distance, lookback)
+pain_z = dist_stdev != 0 ? (distance - dist_sma) / dist_stdev : 0
+
+// === DYNAMIC COLORING ===
+centerColor = color.new(color.purple, 0)
+highColor = color.new(color.red, 0)
+lowColor = color.new(color.green, 0)
+mainColor = pain_z > painZ ? highColor : pain_z < -painZ ? lowColor : centerColor
+
+// === PLOT LINES ===
+plot(pain_z, color=mainColor, linewidth=4, title="RPIx Z-Score")
+hline(0, color=color.gray, linestyle=hline.style_dotted)
+hline(painZ, "High Threshold", highColor, hline.style_dashed, 1)
+hline(-painZ, "Low Threshold", lowColor, hline.style_dashed, 1)
+
+// === DASHBOARD (TOP RIGHT) ===
+if showDashboard
+    var table dash = na
+    if na(dash)
+        dash := table.new(position.middle_right, 1, 3, bgcolor=color.new(color.black, 90), border_color=color.new(color.purple, 80), border_width=1)
+    table.clear(dash, 0, 0)
+    table.cell(dash, 0, 0, "🛑 Retail Pain Index", text_color=color.purple, text_size=size.normal, bgcolor=color.new(color.black, 0))
+    table.cell(dash, 0, 1, "Z-Score: " + str.tostring(pain_z, "#.##"), text_color=mainColor, text_size=size.normal)
+    table.cell(dash, 0, 2, "Threshold: ±" + str.tostring(painZ, "#.##"), text_color=color.gray, text_size=size.normal)
+
+// === MOBILE/COMPACT INFO LABEL (TOP RIGHT) ===
+if showInfoLabel
+    labelText = "RPIx Z: " + str.tostring(pain_z, "#.##") + " | Thresh: ±" + str.tostring(painZ, "#.##")
+    var label mobLabel = na
+    if na(mobLabel)
+        mobLabel := label.new(bar_index, na, labelText, xloc.bar_index, yloc.price, color.new(color.black, 80), label.style_label_left, color.white, size.small)
+    label.set_xy(mobLabel, bar_index, na)
+    label.set_text(mobLabel, labelText)
+    label.set_textcolor(mobLabel, mainColor)
+    label.set_style(mobLabel, label.style_label_left)

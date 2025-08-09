@@ -1,0 +1,243 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © CoffeeShopCrypto
+
+//@version=6
+
+indicator("CoffeeShopCrypto Supertrend Liquidity Engine", shorttitle = "SLE osc Stoploss", overlay=false)
+
+// === Inputs === 
+atrLength = input.int(20, "Length", inline = "atr", group = "ATR Settings") // Changed to 20 for daily reference
+smoothing = input.string("RMA", "Smoothing", options=["RMA", "SMA", "EMA", "WMA", "VWMA"], inline = "atr", group = "ATR Settings") 
+switch_stoploss = input.bool(false, "Scalping or Trending Stoploss", tooltip="Scalp Setting  will automatically change your stoploss level for more security and shift the oscillator into a more sensative style.", group = "--Trading Style-- [Scalping = On, Trending = Off]")
+show_user_ma = input.bool(false, "Show Moving Average", group = "--Trading Style-- [Scalping = On, Trending = Off]")
+show_user_ma_color = input.color(color.blue, title = "Moving Average Color", inline = "ma_settings", group = "--Trading Style-- [Scalping = On, Trending = Off]")
+show_user_ma_width = input.int(1, title = "Width", minval = 1, maxval = 4, inline = "ma_settings", group = "--Trading Style-- [Scalping = On, Trending = Off]")
+
+// === ATR Calculation ===
+ma_function(source, length) =>
+    switch smoothing
+        "RMA" => ta.rma(source, length)
+        "SMA" => ta.sma(source, length)
+        "EMA" => ta.ema(source, length)
+        "WMA" => ta.wma(source, length)
+        "VWMA" => ta.vwma(source, length)
+
+// === Prior Day's ATR (Reference Point) ===
+// Input for timeframe selection
+timeframeSelection = input.timeframe("D", title="Select Timeframe", options=["1", "5", "15", "30", "60", "240", "D"], group = "ATR Settings")
+priorATR = request.security(syminfo.tickerid, timeframeSelection, ta.atr(atrLength)[1], lookahead=barmerge.lookahead_on)
+
+//User Inputs//
+showBuyStopHunt = input.bool(true, title = "Bullish Stophunt", inline = "buystop", group = "Bullish Sentiment")
+showSupport = input.bool(true, title = "Bullish Support", inline = "buystop", group = "Bullish Sentiment")
+showBuyStopHunt_color = input.color(color.rgb(0, 212, 46, 62), title = "Bullish Stophunt Color", inline = "buystop2", group = "Bullish Sentiment")
+showSupport_color = input.color(color.rgb(0, 212, 46, 62), title = "Buy Support Color", inline = "buystop2", group = "Bullish Sentiment")
+showBuySide_liq_color = input.color(color.rgb(0, 212, 46, 62), title = "Buy Side Liqudity Zone", inline = "buyliq2", group = "Bullish Sentiment")
+showSellStopHunt = input.bool(true, title = "Bearish Stophunt", inline = "sellstop", group = "Bearish Sentiment")
+showResistance = input.bool(true, title = "Bearish Resistance", inline = "sellstop", group = "Bearish Sentiment")
+showSellStopHunt_color = input.color(color.rgb(212, 7, 0, 62), title = "Bearish Stophunt Color", inline = "sellstop2", group = "Bearish Sentiment")
+showResistance_color = input.color(color.rgb(212, 7, 0, 62), title = "Bearish Resistance Color", inline = "sellstop2", group = "Bearish Sentiment")
+showSellSide_liq_color = input.color(color.rgb(212, 7, 0, 62), title = "Sell Side Liquidity Zone", inline = "sellliq2", group = "Bearish Sentiment")
+
+// === Current ATR Calculation ===
+currentATR = ta.atr(atrLength)
+
+// === Dynamic Factor (Exponential Approach) ===
+getDynamicFactor(currentATR, priorATR) =>
+    zoneSize = priorATR / 4
+    if currentATR <= zoneSize * 1       // Zone 1 (0-25%)
+        5
+    else if currentATR <= zoneSize * 2  // Zone 2 (25-50%)
+        3
+    else if currentATR <= zoneSize * 3  // Zone 3 (50-75%)
+        1.5
+    else                                // Zone 4 (75-100%)
+        1
+
+// === Get Current Multiplier ===
+rawMultiplier = getDynamicFactor(currentATR, priorATR)
+currentFactor = switch_stoploss ? rawMultiplier : (6 - rawMultiplier)
+
+// === SuperTrend ===
+[supertrend, direction] = ta.supertrend(currentFactor, atrLength)
+
+// === Tighter Stops ===
+uptrendStop = ma_function((close + supertrend) / 2, (atrLength / 2))
+LqduptrendStop = ma_function((high + uptrendStop) / 2, (atrLength / 2))
+downtrendStop = ma_function((close + supertrend) / 2, (atrLength / 2))
+LiqdowntrendStop = ma_function((low + downtrendStop) / 2, (atrLength / 2))
+
+//Moving Average Plots
+// === Plot Moving Average (Same Type as ATR Smoothing) ===
+selected_ma = ma_function(close, atrLength) // Reuses smoothing type from inputs
+typeMovingaverage = plot(show_user_ma ? selected_ma : na, title="Moving Average", color = show_user_ma_color, linewidth = show_user_ma_width, display = display.all - display.status_line, force_overlay = true, editable = false)
+
+// === Helper for Transparency on fill functions===
+maybeTransparent(enabled, originalColor) =>
+    enabled ? originalColor : color.new(originalColor, 100)
+
+// === Plots with Helper Function===
+LongStoploss = plot(direction < 0 ? uptrendStop : na, 
+     title = "Buy Stop", 
+     color = maybeTransparent(showBuyStopHunt, showBuyStopHunt_color), 
+     linewidth = 2, 
+     style = plot.style_linebr, 
+     force_overlay = true, 
+     display = display.all - display.status_line, 
+     editable = false)
+
+LiqLongStoploss = plot(direction < 0 ? LqduptrendStop : na, 
+     title = "Buy Stop Liq", 
+     //color = maybeTransparent(showSupport, showBuySide_liq_color), 
+     color = maybeTransparent(showSupport, showSupport_color), 
+     linewidth = 2, 
+     style = plot.style_linebr, 
+     force_overlay = true, 
+     display = display.all - display.status_line, 
+     editable = false)
+
+ShortStoploss = plot(direction > 0 ? downtrendStop : na, 
+     title = "Sell Stop", 
+     color = maybeTransparent(showSellStopHunt, showSellStopHunt_color), 
+     linewidth = 2, 
+     style = plot.style_linebr, 
+     force_overlay = true, 
+     display = display.all - display.status_line, 
+     editable = false)
+
+LiqShortStoploss = plot(direction > 0 ? LiqdowntrendStop : na, 
+     title = "Sell Stop Liq", 
+     color = maybeTransparent(showResistance, showResistance_color), 
+     linewidth = 2, 
+     style = plot.style_linebr, 
+     force_overlay = true, 
+     display = display.all - display.status_line, 
+     editable = false)
+
+// === Original Supertrend Direction Plots ===
+ST_Uptrend = plot(direction < 0 ? supertrend : na, "(Supertrend) Up Trend", showSupport_color, 2, plot.style_linebr, force_overlay=true, display = display.none - display.status_line, editable = true)
+ST_Downtrend = plot(direction > 0 ? supertrend : na, "(Supertrend) Down Trend", showResistance_color, 2, plot.style_linebr, force_overlay=true, display = display.none - display.status_line, editable = true)
+
+// === Fill Zones ===
+fill(
+     LiqLongStoploss,
+     ST_Uptrend,
+     direction < 0 ? LqduptrendStop : na,   // top_value series float
+     direction < 0 ? supertrend : na,       // bottom_value series float
+     color.rgb(0, 212, 46, 100),             // top color (green with alpha)
+     showBuySide_liq_color,              // bottom color (green with alpha)
+     title = "Buy Liquidity Zone",
+     display = display.all,
+     fillgaps = true,
+     editable = false
+ )
+
+fill(
+     LiqShortStoploss,
+     ST_Downtrend,
+     direction > 0 ? LiqdowntrendStop : na,         // top_value series float
+     direction > 0 ? supertrend : supertrend,       // bottom_value series float 
+     color.rgb(212, 0, 0, 100),                   // bottom color (red with alpha)
+     showSellSide_liq_color,                        // top color (red with alpha)
+     title = "Sell Liquidity Zone",
+     display = display.all,
+     fillgaps = true,
+     editable = false
+ )
+
+// === Fill Zones ===
+fill(ST_Uptrend, LongStoploss, color=color.new(color.green, 85), title="Uptrend Zone", display = display.none, editable = false)
+fill(ST_Uptrend, LiqLongStoploss, color=color.new(color.green, 85), title="Uptrend Liquidity Zone", display = display.none, editable = false)
+fill(ST_Downtrend, ShortStoploss, color=color.new(color.red, 85), title="Downtrend Zone", display = display.none, editable = false)
+fill(ST_Downtrend, LiqShortStoploss, color=color.new(color.red, 85), title="Downtrend Liquidity Zone", display = display.none, editable = false)
+
+// === SuperTrend Stoploss Histogram Oscillator ===
+uptrendDiff = direction < 0 ? (supertrend - uptrendStop) : na
+downtrendDiff = direction > 0 ? (downtrendStop - supertrend) : na
+oscillatorValue = nz(uptrendDiff, -downtrendDiff)
+
+// Histogram Colors
+oscillatorValuePrev = nz(oscillatorValue[1], 0)
+risingPositive = oscillatorValue >= 0 and oscillatorValue > oscillatorValuePrev
+fallingPositive = oscillatorValue >= 0 and oscillatorValue <= oscillatorValuePrev
+risingNegative = oscillatorValue < 0 and oscillatorValue > oscillatorValuePrev
+fallingNegative = oscillatorValue < 0 and oscillatorValue <= oscillatorValuePrev
+
+strongGreen = input.color(#EF5350, title = "Strong Short", inline = "histLong", group = "Trending Liquidity Histogram")
+weakGreen = input.color(#FFCDD2, title = "Bearish Absorption", inline = "histLong", group = "Trending Liquidity Histogram")
+strongRed = input.color(#26A69A, title = "Strong Long", inline = "histShort", group = "Trending Liquidity Histogram")
+weakRed = input.color(#B2DFDB, title = "Bullish Absorption", inline = "histShort", group = "Trending Liquidity Histogram")
+
+trend_histoColor = risingPositive ? strongGreen : 
+             fallingPositive ? weakGreen :
+             fallingNegative ? strongRed :
+             risingNegative ? weakRed : 
+             color.gray
+
+scalp_histoColor = risingPositive ? strongRed : 
+             fallingPositive ? weakRed :
+             fallingNegative ? strongGreen :
+             risingNegative ? weakGreen : 
+             color.gray
+
+plot(switch_stoploss ? oscillatorValue : -oscillatorValue, title="Stoploss Oscillator", style=plot.style_columns, color=switch_stoploss ? scalp_histoColor : trend_histoColor, linewidth=2, display = display.all - display.status_line, editable = false)
+
+// === ATR Factor Change Tracking in Real Time===
+var factorHistory = array.new_int(5, int(currentFactor))
+var pointer = 0
+var bool isChanged = false
+
+if barstate.isconfirmed
+    array.set(factorHistory, pointer, int(currentFactor))
+    pointer := (pointer + 1) % 5
+    compareIndex = (pointer - 2) % 5
+    isChanged := array.get(factorHistory, pointer) != array.get(factorHistory, compareIndex)
+
+// Calculate close price trend over atrLength
+closeChange = close - close[atrLength]
+isRising = closeChange > 0
+isFalling = closeChange < 0
+
+showBuySide_liq = true
+showSellSide_liq = true
+
+// Decide trending / non-trending background color for the row
+bgColorTrend = color.black
+
+if isRising
+    bgColorTrend := showBuySide_liq_color
+else if isFalling
+    bgColorTrend := showSellSide_liq_color
+
+// Decide text for the new row
+trendText = isRising ? "Rising" : isFalling ? "Falling" : "Neutral"
+
+// === Table Display ===
+var table infoTable = table.new(position.top_right, 2, 7, border_width=1)
+
+// Empty first row to avoid chart controls
+table.cell(infoTable, 0, 0, "", bgcolor=color.rgb(0,0,0,100))
+table.cell(infoTable, 1, 0, "", bgcolor=color.rgb(0,0,0,100))
+
+// Headers
+table.cell(infoTable, 0, 1, "Parameter", bgcolor=color.rgb(173, 1, 1, 18), text_color=color.white)
+table.cell(infoTable, 1, 1, "Value", bgcolor=color.rgb(173, 1, 1, 18), text_color=color.white)
+
+// Data Rows
+table.cell(infoTable, 0, 2, "Lookback", bgcolor=color.rgb(248,39,39,18), text_color=color.white)
+table.cell(infoTable, 1, 2, str.tostring(atrLength), bgcolor=color.rgb(248,39,39,18), text_color=color.white)
+
+table.cell(infoTable, 0, 3, "ATR Value", bgcolor=color.rgb(247,78,78,18), text_color=color.white)
+table.cell(infoTable, 1, 3, str.tostring(currentATR, "#.##"), bgcolor=color.rgb(247,78,78,18), text_color=color.white)
+
+table.cell(infoTable, 0, 4, "Factor", bgcolor=color.rgb(248,99,99,18), text_color=color.white)
+table.cell(infoTable, 1, 4, str.tostring(currentFactor), 
+     bgcolor=isChanged ? color.rgb(112, 2, 35, 7) : color.rgb(248,99,99,18), 
+     text_color=color.white)
+
+table.cell(infoTable, 0, 5, "Stoploss", bgcolor=color.rgb(245,124,124,18), text_color=color.white)
+table.cell(infoTable, 1, 5, str.tostring(direction < 0 ? uptrendStop : downtrendStop, "#.##"), 
+     bgcolor=color.rgb(245,124,124,18), text_color=color.white)
+
+table.cell(infoTable, 0, 6, "Trend", bgcolor=color.rgb(243, 149, 149, 18), text_color=color.white)
+table.cell(infoTable, 1, 6, trendText, bgcolor=bgColorTrend, text_color=color.white)

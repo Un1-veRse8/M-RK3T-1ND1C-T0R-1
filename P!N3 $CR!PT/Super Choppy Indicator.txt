@@ -1,0 +1,244 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// ©shui2967
+
+//@version=5
+indicator("Super Choppy Indicator", shorttitle="SCI", format=format.inherit, precision=2)
+
+// ===== BALANCED INPUT PARAMETERS =====
+short_period = input.int(5, title="Short Period (Fractal)", minval=3, maxval=15)     // Back to 5
+long_period = input.int(18, title="Long Period (Trend)", minval=12, maxval=30)       // Moderate reduction
+volatility_period = input.int(12, title="Volatility Period", minval=8, maxval=20)    // Slight reduction
+ml_lookback = input.int(40, title="ML Learning Period", minval=25, maxval=80)        // Moderate reduction
+adaptation_rate = input.float(0.03, title="Adaptation Rate", minval=0.01, maxval=0.1, step=0.01) // Reduced
+prediction_strength = input.float(0.65, title="Prediction Confidence", minval=0.5, maxval=0.85, step=0.05)
+
+// Balanced threshold levels
+choppy_threshold = input.float(60.0, title="Choppy Threshold", minval=55, maxval=70)
+trending_threshold = input.float(40.0, title="Trending Threshold", minval=30, maxval=45)
+
+// Noise filtering controls
+noise_filter = input.float(2.0, title="Noise Filter Strength", minval=1.0, maxval=5.0, step=0.5)
+trend_confirmation = input.int(3, title="Trend Confirmation Bars", minval=2, maxval=5)
+
+// ===== NOISE-FILTERED FRACTAL DETECTION =====
+fractal_high(len) =>
+    pivot = len / 2
+    high_val = high[pivot]
+    is_fractal = true
+    // Stricter validation to reduce noise
+    for i = 0 to len-1
+        if i != pivot and high[i] >= high_val
+            is_fractal := false
+            break
+    is_fractal ? high_val : na
+
+fractal_low(len) =>
+    pivot = len / 2
+    low_val = low[pivot]
+    is_fractal = true
+    for i = 0 to len-1
+        if i != pivot and low[i] <= low_val
+            is_fractal := false
+            break
+    is_fractal ? low_val : na
+
+// Detect fractals
+short_fractal_high = fractal_high(short_period)
+short_fractal_low = fractal_low(short_period)
+long_fractal_high = fractal_high(long_period)
+long_fractal_low = fractal_low(long_period)
+
+// ===== SMOOTHED VOLATILITY ANALYSIS =====
+atr_current = ta.atr(volatility_period)
+atr_smoothed = ta.ema(atr_current, 5)  // Smooth ATR to reduce noise
+atr_normalized = atr_smoothed / close * 100
+
+// Enhanced range efficiency with smoothing
+price_range = high - low
+true_range = ta.tr
+range_efficiency = ta.ema(price_range / true_range, 3)  // Smooth efficiency
+
+// Filtered volatility clustering
+vol_sma = ta.sma(atr_current, volatility_period)
+vol_ratio = ta.ema(atr_current / vol_sma, 3)  // Smooth ratio
+
+// ===== BALANCED FRACTAL ENERGY =====
+var float short_fractal_energy = 50.0
+var float long_fractal_energy = 50.0
+
+// More stable fractal energy calculation
+if not na(short_fractal_high) or not na(short_fractal_low)
+    price_move = math.abs(close - close[short_period/2])
+    time_factor = short_period
+    energy = (price_move / close) * 100 / math.log(time_factor + 1) * 50
+    // Apply smoothing to reduce volatility
+    short_fractal_energy := ta.ema(math.max(0, math.min(100, energy)), 3)
+
+if not na(long_fractal_high) or not na(long_fractal_low)
+    price_move = math.abs(close - close[long_period/2])
+    time_factor = long_period
+    energy = (price_move / close) * 100 / math.log(time_factor + 1) * 50
+    long_fractal_energy := ta.ema(math.max(0, math.min(100, energy)), 3)
+
+// ===== FILTERED MACHINE LEARNING FEATURES =====
+// Smoothed features to reduce noise
+feature1 = ta.ema(atr_normalized / 10, 3)
+feature2 = ta.ema(range_efficiency, 3)
+feature3 = ta.ema(vol_ratio, 3)
+feature4 = ta.ema(math.abs(short_fractal_energy - long_fractal_energy) / 100, 3)
+feature5 = ta.ema(ta.rsi(close, 14) / 100, 2)
+feature6 = ta.ema((close - ta.sma(close, 20)) / ta.stdev(close, 20), 3)
+
+// Normalize features with smoothing
+normalize_feature(x, period) =>
+    sma_x = ta.sma(x, period)
+    std_x = ta.stdev(x, period)
+    normalized = std_x > 0 ? (x - sma_x) / std_x : 0
+    ta.ema(normalized, 2)  // Apply smoothing
+
+norm_f1 = normalize_feature(feature1, ml_lookback)
+norm_f2 = normalize_feature(feature2, ml_lookback)
+norm_f3 = normalize_feature(feature3, ml_lookback)
+norm_f4 = normalize_feature(feature4, ml_lookback)
+norm_f5 = normalize_feature(feature5, ml_lookback)
+norm_f6 = normalize_feature(feature6, ml_lookback)
+
+// ===== STABLE WEIGHT SYSTEM =====
+var float w1 = 0.20
+var float w2 = 0.18
+var float w3 = 0.22
+var float w4 = 0.25
+var float w5 = 0.10
+var float w6 = 0.05
+
+// ===== NOISE-FILTERED CHOPPINESS CALCULATION =====
+// Standard choppiness with smoothing
+basic_chop_raw = 100 * math.log10(math.sum(atr_current, volatility_period) / 
+                 (ta.highest(high, volatility_period) - ta.lowest(low, volatility_period))) / 
+                 math.log10(volatility_period)
+// Convert noise_filter to integer
+noise_filter_int = int(noise_filter)
+
+// Use the integer version
+basic_chop = ta.ema(basic_chop_raw, noise_filter_int)  // Apply noise filtering
+
+
+// ML signal with reduced sensitivity
+ml_signal = w1 * norm_f1 + w2 * norm_f2 + w3 * norm_f3 + w4 * norm_f4 + w5 * norm_f5 + w6 * norm_f6
+
+// Balanced sigmoid activation
+sigmoid(x) => 1 / (1 + math.exp(-math.max(-6, math.min(6, x))))
+activated_ml_raw = sigmoid(ml_signal) * 100
+activated_ml = ta.ema(activated_ml_raw, 2)  // Smooth ML output
+
+// Balanced component calculation
+fractal_component = ta.ema(math.abs(short_fractal_energy - long_fractal_energy), 3)
+volatility_component = ta.ema((vol_ratio - 1) * 50 + 50, 3)
+
+// Final calculation with noise filtering
+raw_sci = (basic_chop * 0.4) + (activated_ml * 0.35) + (fractal_component * 0.15) + (volatility_component * 0.1)
+super_choppy_index_raw = math.max(0, math.min(100, raw_sci))
+
+// Apply final smoothing to reduce wave effect
+super_choppy_index = ta.ema(super_choppy_index_raw, noise_filter_int)
+
+// ===== CONSERVATIVE LEARNING =====
+if bar_index > ml_lookback
+    actual_chop = basic_chop[3]  // Use confirmed data
+    predicted_chop = activated_ml[3]
+    error = actual_chop - predicted_chop
+    
+    // Only learn from significant, confirmed errors
+    if math.abs(error) > 8 and math.abs(error) < 30  // Avoid extreme outliers
+        conservative_rate = adaptation_rate * 0.5  // Reduce learning aggression
+        
+        w1 := w1 + conservative_rate * error * norm_f1[3] / 200
+        w2 := w2 + conservative_rate * error * norm_f2[3] / 200
+        w3 := w3 + conservative_rate * error * norm_f3[3] / 200
+        w4 := w4 + conservative_rate * error * norm_f4[3] / 200
+        w5 := w5 + conservative_rate * error * norm_f5[3] / 200
+        w6 := w6 + conservative_rate * error * norm_f6[3] / 200
+        
+        // Strict weight normalization
+        total_w = math.abs(w1) + math.abs(w2) + math.abs(w3) + math.abs(w4) + math.abs(w5) + math.abs(w6)
+        if total_w > 1.1
+            w1 := w1 / total_w
+            w2 := w2 / total_w
+            w3 := w3 / total_w
+            w4 := w4 / total_w
+            w5 := w5 / total_w
+            w6 := w6 / total_w
+
+// ===== CONFIRMED TREND PREDICTION =====
+// Require confirmation over multiple bars
+trend_momentum = ta.change(super_choppy_index, trend_confirmation)
+trend_stability = ta.stdev(super_choppy_index, trend_confirmation)
+
+// Only signal when trend is stable and significant
+confidence = math.abs(trend_momentum) > 3 and trend_stability < 5 ? 
+             math.min(prediction_strength * 100, 85) : 30
+
+predicted_direction = trend_momentum > 0 ? 1 : trend_momentum < 0 ? -1 : 0
+prediction_strength_val = confidence > (prediction_strength * 100) ? predicted_direction : 0
+
+// ===== STABLE PLOTTING =====
+// Reduce color flickering
+sci_color = super_choppy_index > choppy_threshold ? color.red :  super_choppy_index < trending_threshold ? color.green : color.orange
+
+plot(super_choppy_index, title="Balanced Super Choppy Index", color=sci_color, linewidth=2)
+
+// Clear threshold lines
+hline(choppy_threshold, title="Choppy Threshold", color=color.red, linestyle=hline.style_dashed)
+hline(trending_threshold, title="Trending Threshold", color=color.green, linestyle=hline.style_dashed)
+hline(50, title="Neutral", color=color.gray, linestyle=hline.style_dotted)
+
+// Only show confirmed prediction signals
+plotshape(prediction_strength_val == 1 and prediction_strength_val[1] != 1 and confidence > 70, 
+          title="Confirmed Choppiness Increase", style=shape.triangleup, 
+          location=location.bottom, color=color.red, size=size.small)
+          
+plotshape(prediction_strength_val == -1 and prediction_strength_val[1] != -1 and confidence > 70, 
+          title="Confirmed Trend Increase", style=shape.triangledown, 
+          location=location.top, color=color.green, size=size.small)
+
+// Subtle background coloring
+bgcolor_color = super_choppy_index > choppy_threshold ? color.new(color.red, 96) : super_choppy_index < trending_threshold ? color.new(color.green, 96) : na
+bgcolor(bgcolor_color, title="Market State Background")
+
+// ===== INFORMATION TABLE =====
+if barstate.islast
+    var table info_table = table.new(position.top_left, 2, 8, bgcolor=color.white, border_width=1)
+    
+    table.cell(info_table, 0, 0, "Balanced SCI Metrics", text_color=color.black, bgcolor=color.gray)
+    table.cell(info_table, 1, 0, "Value", text_color=color.black, bgcolor=color.gray)
+    
+    table.cell(info_table, 0, 1, "SCI Value", text_color=color.black)
+    table.cell(info_table, 1, 1, str.tostring(super_choppy_index, "#.##"), text_color=color.black)
+    
+    market_state = super_choppy_index > choppy_threshold ? "CHOPPY" : 
+                   super_choppy_index < trending_threshold ? "TRENDING" : "TRANSITIONAL"
+    table.cell(info_table, 0, 2, "Market State", text_color=color.black)
+    table.cell(info_table, 1, 2, market_state, text_color=color.black)
+    
+    table.cell(info_table, 0, 3, "Prediction", text_color=color.black)
+    pred_text = prediction_strength_val == 1 ? "↑ More Choppy" :  prediction_strength_val == -1 ? "↓ More Trending" : "Neutral"
+    table.cell(info_table, 1, 3, pred_text, text_color=color.black)
+    
+    table.cell(info_table, 0, 4, "Confidence", text_color=color.black)
+    table.cell(info_table, 1, 4, str.tostring(confidence, "#.#") + "%", text_color=color.black)
+    
+    table.cell(info_table, 0, 5, "Trend Stability", text_color=color.black)
+    table.cell(info_table, 1, 5, str.tostring(trend_stability, "#.##"), text_color=color.black)
+    
+    table.cell(info_table, 0, 6, "Noise Filter", text_color=color.black)
+    table.cell(info_table, 1, 6, str.tostring(noise_filter, "#.#"), text_color=color.black)
+    
+    table.cell(info_table, 0, 7, "ML Signal", text_color=color.black)
+    table.cell(info_table, 1, 7, str.tostring(activated_ml, "#.##"), text_color=color.black)
+
+// ===== CONFIRMED ALERTS =====
+alertcondition(ta.crossover(super_choppy_index, choppy_threshold) and trend_stability < 5, 
+               title="Confirmed Market Turning Choppy", message="Balanced SCI: Market confirmed entering choppy phase")
+               
+alertcondition(ta.crossunder(super_choppy_index, trending_threshold) and trend_stability < 5, 
+               title="Confirmed Market Turning Trending", message="Balanced SCI: Market confirmed entering trending phase")

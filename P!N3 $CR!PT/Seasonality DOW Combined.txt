@@ -1,0 +1,108 @@
+//@version=5
+//Author @COLONELMOOSEFUDGE
+indicator("Seasonality DOW Combined", "Seasonality DOW Combined", format = format.volume)
+
+if not timeframe.isdaily
+    runtime.error("Please switch timeframe to Daily")
+
+// Shared Inputs
+i_year_start = input(2000, "Start Year")
+i_text_size = input.string(size.auto, "Text Size", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge])
+
+// Shared Variables
+var year_start_ = math.max(year, i_year_start)
+var no_years_ = year(timenow) - year_start_ + 1
+var text_color_ = color.white
+var bg_color_ = color.gray
+int COUNT = 0
+int COUNT_POSITIVE = 1
+
+// Month Table Variables
+var matrix<float> month_data_ = matrix.new<float>(no_years_, 12, 0.0)
+var matrix<float> month_agg_ = matrix.new<float>(2, 12, 0.0)
+var table month_table_ = na
+
+// Day of Week Table Variables
+var matrix<float> dow_data_ = matrix.new<float>(no_years_, 7, 0.0)
+var matrix<float> dow_agg_ = matrix.new<float>(2, 7, 0.0)
+var table dow_table_ = na
+
+// Function Definition
+f_matrix_add(matrix_, row_, col_, val_) =>
+    cur_val_ = matrix.get(matrix_, row_, col_)
+    matrix.set(matrix_, row_, col_, cur_val_ + val_)
+
+// Calculate Percentage Change
+chg_pct_ = request.security(syminfo.tickerid, "D", nz(close/close[1] - 1))
+
+// Month Data Processing
+if year >= year_start_
+    month_index = month - 1
+    cur_month_val_ = matrix.get(month_data_, year - year_start_, month_index)
+    matrix.set(month_data_, year - year_start_, month_index, cur_month_val_ + chg_pct_)
+    f_matrix_add(month_agg_, COUNT, month_index, 1)
+    if chg_pct_ > 0.
+        f_matrix_add(month_agg_, COUNT_POSITIVE, month_index, 1)
+
+// Day of Week Data Processing
+if year >= year_start_
+    dow_index = dayofweek(time) - 1  // 0=Sun, 1=Mon, ..., 6=Sat
+    cur_dow_val_ = matrix.get(dow_data_, year - year_start_, dow_index)
+    matrix.set(dow_data_, year - year_start_, dow_index, cur_dow_val_ + chg_pct_)
+    f_matrix_add(dow_agg_, COUNT, dow_index, 1)
+    if chg_pct_ > 0.
+        f_matrix_add(dow_agg_, COUNT_POSITIVE, dow_index, 1)
+
+// Display Tables on Last Bar
+if barstate.islast
+    // Month Table (Left Side - position.middle_left)
+    month_table_ := table.new(position.middle_left, 14, no_years_ + 4, border_width = 1)
+    month_names = array.from("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    for i = 0 to 11
+        table.cell(month_table_, i + 1, 0, month_names.get(i), text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+    
+    for month_row_ = 0 to no_years_ - 1
+        table.cell(month_table_, 0, 1 + month_row_, str.tostring(month_row_ + year_start_), text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+        for col_ = 0 to 11
+            val_ = matrix.get(month_data_, month_row_, col_)
+            val_color_ = val_ > 0 ? color.green : val_ < 0 ? color.red : color.gray
+            table.cell(month_table_, 1 + col_, 1 + month_row_, str.format("{0,number,###.##%}", val_), bgcolor = color.new(val_color_, 80), text_color = val_color_, text_size = i_text_size)
+    
+    month_agg_row_ = no_years_ + 1
+    table.cell(month_table_, 0, month_agg_row_, "SUM", text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+    table.cell(month_table_, 0, month_agg_row_ + 1, "+ive", text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+    for col_ = 0 to 11
+        arr_ = matrix.col(month_data_, col_)
+        val_ = array.sum(arr_)
+        val_color_ = val_ > 0 ? color.green : val_ < 0 ? color.red : color.gray
+        table.cell(month_table_, 1 + col_, month_agg_row_, str.format("{0,number,###.##%}", val_), bgcolor = color.new(val_color_, 50), text_color = val_color_, text_size = i_text_size)
+        count_ = matrix.get(month_agg_, COUNT, col_)
+        count_pos_ = matrix.get(month_agg_, COUNT_POSITIVE, col_)
+        tt_ = str.format("{0}/{1}", count_pos_, count_)
+        table.cell(month_table_, 1 + col_, month_agg_row_ + 1, str.format("{0,number,percent}", nz(count_pos_/count_)), bgcolor = color.new(val_color_, 50), text_color = color.new(color.white, 50), text_size = i_text_size, tooltip = tt_)
+
+    // Day of Week Table (Right Side - position.middle_right)
+    dow_table_ := table.new(position.middle_right, 8, no_years_ + 4, border_width = 1)
+    dow_names = array.from("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+    for i = 0 to 6
+        table.cell(dow_table_, i + 1, 0, dow_names.get(i), text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+    
+    for dow_row_ = 0 to no_years_ - 1
+        table.cell(dow_table_, 0, 1 + dow_row_, str.tostring(dow_row_ + year_start_), text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+        for col_ = 0 to 6
+            val_ = matrix.get(dow_data_, dow_row_, col_)
+            val_color_ = val_ > 0 ? color.green : val_ < 0 ? color.red : color.gray
+            table.cell(dow_table_, 1 + col_, 1 + dow_row_, str.format("{0,number,###.##%}", val_), bgcolor = color.new(val_color_, 80), text_color = val_color_, text_size = i_text_size)
+    
+    dow_agg_row_ = no_years_ + 1
+    table.cell(dow_table_, 0, dow_agg_row_, "SUM", text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+    table.cell(dow_table_, 0, dow_agg_row_ + 1, "+ive", text_color = text_color_, bgcolor = bg_color_, text_size = i_text_size)
+    for col_ = 0 to 6
+        arr_ = matrix.col(dow_data_, col_)
+        val_ = array.sum(arr_)
+        val_color_ = val_ > 0 ? color.green : val_ < 0 ? color.red : color.gray
+        table.cell(dow_table_, 1 + col_, dow_agg_row_, str.format("{0,number,###.##%}", val_), bgcolor = color.new(val_color_, 50), text_color = val_color_, text_size = i_text_size)
+        count_ = matrix.get(dow_agg_, COUNT, col_)
+        count_pos_ = matrix.get(dow_agg_, COUNT_POSITIVE, col_)
+        tt_ = str.format("{0}/{1}", count_pos_, count_)
+        table.cell(dow_table_, 1 + col_, dow_agg_row_ + 1, str.format("{0,number,percent}", nz(count_pos_/count_)), bgcolor = color.new(val_color_, 50), text_color = color.new(color.white, 50), text_size = i_text_size, tooltip = tt_)

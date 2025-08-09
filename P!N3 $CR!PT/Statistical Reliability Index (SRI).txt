@@ -1,0 +1,66 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © RWCS_LTD
+
+//@version=6
+indicator("Statistical Reliability Index (SRI)", overlay=false)
+
+// User-defined weights
+length = input.int(50, "Length for Calculation", group = "Statistical Reliability Index Length", tooltip = "Defines the number of bars used for calculating averages and statistical metrics (SMA, CV, CDF). Larger values smooth the index but may lag.")
+
+w1 = input.float(0.4, "Weight CDF", group = "Statistical Weightings", tooltip = "Adjusts the importance of the CDF extrapolation in the SRI calculation. Higher values give more weight to extreme price movements.")
+w2 = input.float(0.3, "Weight Bias Factor", group = "Statistical Weightings", tooltip = "Adjusts the influence of the Bias Factor, which measures the current price relative to the expected mean. Higher values emphasize mean reversion.")
+w3 = input.float(0.3, "Weight CV", group = "Statistical Weightings", tooltip = "Adjusts the weight of the Coefficient of Variation (CV) in the SRI calculation. Higher values emphasize price stability.")
+
+cdf = input.float(0.95, "Statistical Percentile", group = "Statistical Parameters", tooltip = "Specifies the percentile for the CDF calculation (e.g., 0.95 for the 95th percentile). Used to estimate extreme movements.")
+BF = input.float(1.5, "Bias Factor", group = "Statistical Parameters", tooltip = "Normalization factor for the Bias calculation. Adjust based on typical bias range (e.g., 1.5 for a ratio of mean to nominal between 0.5 and 1.5).")
+CV = input.float(0.5, "Coefficient Variable Factor", group = "Statistical Parameters", tooltip = "Normalization factor for the CV calculation. Adjust to reflect typical volatility ranges (e.g., 0.5 for common asset volatility).")
+stability_length = input.int(14, "Stability Calculation Length", group = "Statistical Parameters", tooltip = "Defines the number of bars used to calculate the volatility of the SRI itself. Shorter lengths make the stability assessment more reactive.")
+chop_threshold = input.float(500, "SRI Volatility Threshold", group = "Statistical Parameters", tooltip = "Sets the threshold for identifying chop mode based on the SRI's own volatility. Values above this indicate choppy or sideways market conditions.")
+
+// Calculate Returns (to better capture movement)
+returns = close / close[1] - 1
+
+// CDF Extrapolation: Calculate the 95th percentile of recent returns
+cdf_value = ta.percentile_linear_interpolation(returns, length, cdf)
+
+// Bias Factor: Ratio of the current price to the expected mean price
+mean_price = ta.sma(close, length)
+bias_factor = close / mean_price
+
+// Coefficient of Variation (CV): Normalized for stability
+std_dev = ta.stdev(returns, length)
+mean_return = ta.sma(returns, length)
+cv = std_dev / mean_return
+
+// Normalizing factors to keep within range
+normalized_bias = bias_factor / BF  // Assuming bias typically ranges [0.5, 1.5]
+normalized_cv = cv / CV             // Assuming CV typically ranges [0, 0.5]
+
+// Statistical Reliability Index (SRI) calculation
+sri = (w1 * cdf_value) + (w2 * normalized_bias) + (w3 * (1 - normalized_cv))
+
+// Stability of the SRI (Meta-Stability)
+sri_volatility = ta.stdev(sri, stability_length)
+
+// Define Trend and Chop Mode
+is_chop = sri_volatility > chop_threshold
+is_trend = not is_chop
+
+// Plotting the SRI
+sri_color = -sri > 1 ? color.aqua : -sri < 1 ? color.fuchsia : na
+plot(-sri, color=sri_color, linewidth=2, title="SRI")
+hline(1, "Benchmark", color=color.gray, linestyle=hline.style_dashed)
+
+// Signal Markers
+long_signal = ta.crossover(1, sri) and is_trend   // Entry only in trend mode
+short_signal = ta.crossunder(1, sri) and is_trend  // Exit only in trend mode
+
+bgcolor(sri < 1 ? color.new(color.aqua, 80) : sri > 1 ? color.new(color.fuchsia, 80) : na, title="Stability Zone", force_overlay = true)
+bgcolor(is_chop ? color.new(color.yellow, 80) : na)
+
+// Enhanced SRI Volatility Plot: Area Fill
+vol_color = is_chop ? color.new(color.yellow, 40) : color.new(color.blue, 40)
+plot(sri_volatility, color=vol_color, title="SRI Volatility", style=plot.style_stepline, linewidth=2)
+
+// Chop Threshold Highlight
+hline(chop_threshold, "Chop Threshold", color=color.yellow, linestyle=hline.style_dotted)

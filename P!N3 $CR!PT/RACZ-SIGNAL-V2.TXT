@@ -1,0 +1,110 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © EtherRider
+
+//@version=5
+indicator("RACZ-SIGNAL-V2.1", overlay=false)
+
+// === Inputs ===
+rsiSource     = input.source(close, "RSI Source")
+rsiPeriod     = input.int(14, "RSI Period")
+rsiOSLevel    = input.int(33, "RSI Oversold Level")
+rsiOBLevel    = input.int(67, "RSI Overbought Level")
+vwapRsiPeriod = input.int(14, "VWAP RSI Period")
+adxPeriod     = input.int(14, "ADX Period")
+adxLookback   = input.int(50, "ADX Dynamic Lookback")
+adxFactor     = input.float(0.9, "ADX Threshold Factor (0.9 = 90%)")
+
+// === RSI & VWAP ===
+rsi = ta.rsi(rsiSource, rsiPeriod)
+vwapRsi = ta.rsi(ta.vwap, vwapRsiPeriod)
+
+// === Manual ADX ===
+upMove   = high - high[1]
+downMove = low[1] - low
+plusDM   = (upMove > downMove and upMove > 0) ? upMove : 0
+minusDM  = (downMove > upMove and downMove > 0) ? downMove : 0
+trur     = ta.rma(ta.tr(true), adxPeriod)
+plusDI   = 100 * ta.rma(plusDM, adxPeriod) / trur
+minusDI  = 100 * ta.rma(minusDM, adxPeriod) / trur
+dx       = 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+adx      = ta.rma(dx, adxPeriod)
+dynamicThreshold = ta.sma(adx, adxLookback) * adxFactor
+
+// === Scores ===
+bullDiv = ta.crossover(rsi, 30)
+bearDiv = ta.crossunder(rsi, 70)
+
+rsiBullPts     = rsi < rsiOSLevel     ? 3 : 0
+vwapBullPts    = vwapRsi < rsiOSLevel ? 3 : 0
+divBullPts     = bullDiv              ? 3 : 0
+adxBullPts     = adx >= dynamicThreshold ? 3 : 0
+
+rsiBearPts     = rsi > rsiOBLevel     ? 3 : 0
+vwapBearPts    = vwapRsi > rsiOBLevel ? 3 : 0
+divBearPts     = bearDiv              ? 3 : 0
+adxBearPts     = adx >= dynamicThreshold ? 3 : 0
+
+bullScore = rsiBullPts + vwapBullPts + divBullPts + adxBullPts
+bearScore = rsiBearPts + vwapBearPts + divBearPts + adxBearPts
+signalPower = math.max(bullScore, bearScore)
+isBuy  = bullScore > bearScore
+isSell = bearScore > bullScore
+isNeutral = bullScore == bearScore
+
+// === Signal State for Panel ===
+signalText = isBuy ? "BUY" : isSell ? "SELL" : "NEUTRAL"
+signalColor = isBuy ? color.green : isSell ? color.red : color.silver
+
+// === Volume State ===
+volMean = ta.sma(volume, 20)
+volStd  = ta.stdev(volume, 20)
+zVol = (volume - volMean) / volStd
+
+volState = zVol > 2     ? "Unusual Spike" :
+           zVol > 1     ? "High" :
+           zVol < -2    ? "Unusual Drop" :
+           zVol < -1    ? "Low" :
+           "Normal"
+
+volColor = zVol > 2     ? color.red :
+           zVol > 1     ? color.orange :
+           zVol < -2    ? color.blue :
+           zVol < -1    ? color.aqua :
+           color.gray
+
+// === Color scheme for histogram
+barColor = signalPower >= 9 and isBuy ? color.green :
+           signalPower >= 9 and isSell ? color.red :
+           signalPower >= 6 and isBuy ? color.new(color.green, 40) :
+           signalPower >= 6 and isSell ? color.new(color.red, 40) :
+           color.gray
+
+// === Histogram Plot
+plot(signalPower, title="Signal Power (0–12)", style=plot.style_columns, color=barColor, linewidth=2)
+
+// === Threshold Lines
+hline(12, "Max", color=color.gray)
+hline(9, "Strong", color=color.green)
+hline(6, "Medium", color=color.orange)
+hline(0, "Weak", color=color.gray)
+
+// === PANEL TABLE (6 Rows Now) ===
+var table statusPanel = table.new(position.top_right, 2, 6, frame_color=color.black, border_width=1)
+
+table.cell(statusPanel, 0, 0, text="RSI", bgcolor=barColor, text_color=color.white)
+table.cell(statusPanel, 1, 0, text=str.tostring(math.max(rsiBullPts, rsiBearPts)), bgcolor=barColor, text_color=color.white)
+
+table.cell(statusPanel, 0, 1, text="VWAP", bgcolor=barColor, text_color=color.white)
+table.cell(statusPanel, 1, 1, text=str.tostring(math.max(vwapBullPts, vwapBearPts)), bgcolor=barColor, text_color=color.white)
+
+table.cell(statusPanel, 0, 2, text="DIV", bgcolor=barColor, text_color=color.white)
+table.cell(statusPanel, 1, 2, text=str.tostring(math.max(divBullPts, divBearPts)), bgcolor=barColor, text_color=color.white)
+
+table.cell(statusPanel, 0, 3, text="ADX", bgcolor=barColor, text_color=color.white)
+table.cell(statusPanel, 1, 3, text=str.tostring(math.max(adxBullPts, adxBearPts)), bgcolor=barColor, text_color=color.white)
+
+table.cell(statusPanel, 0, 4, text="SIGNAL", bgcolor=signalColor, text_color=color.white)
+table.cell(statusPanel, 1, 4, text=signalText, bgcolor=signalColor, text_color=color.white)
+
+table.cell(statusPanel, 0, 5, text="VOLUME", bgcolor=volColor, text_color=color.white)
+table.cell(statusPanel, 1, 5, text=volState, bgcolor=volColor, text_color=color.white)

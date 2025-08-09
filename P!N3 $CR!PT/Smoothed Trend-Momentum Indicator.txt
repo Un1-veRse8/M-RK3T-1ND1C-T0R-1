@@ -1,0 +1,133 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © kristof_c
+
+//@version=6
+indicator("Smoothed Trend-Momentum Indicator", "STM Indicator", overlay = true)
+
+// Inputs
+period = input.int(50, title="Trend Filter Length", minval=1)
+poles = input.int(1, title="Filter Order", minval=1, maxval=4)
+smooth_len = input.int(10, title="Trend Length")
+smooth_offset = input.int(1, title="Flatten Multiplier")
+
+enable_table = input.bool(true, title="Show Table")
+table_size = input.string("Small", title="Table Size", options = ["Tiny", "Small", "Medium", "Large"])
+tf1 = input.timeframe("5", "Timeframe 1")
+tf2 = input.timeframe("15", "Timeframe 2")
+tf3 = input.timeframe("60", "Timeframe 3")
+tf4 = input.timeframe("240", "Timeframe 4")
+tf5 = input.timeframe("1D", "Timeframe 5")
+
+vol_highlight = input.bool(true, title="Volume Highlight")
+vol_sensitivity = input.int(70, title="Volume Sensitivity", minval=1, maxval=99)
+extra_signals = input.bool(false, title="Extra Signals")
+show_bands = input.bool(false, title="Show Bands")
+color_bars = input.bool(true, title="Color Bars")
+bull_color = input.color(#00ffbb, title="Bullish Color")
+bear_color = input.color(#ff1100, title="Bearish Color")
+
+// Custom functions
+calcGaussianAlpha(len, ord) =>
+    freq = (2.0 * math.pi) / len
+    factorB = (1.0 - math.cos(freq)) / (math.pow(1.414, (2.0 / ord)) - 1.0)
+    alphaVal = -factorB + math.sqrt(factorB * factorB + 2.0 * factorB)
+    alphaVal
+
+gaussianSmooth(dataIn, filterLevel, alphaCoeff) =>
+    var float runningFilterValue = 0.0
+    oneMinusAlpha = 1.0 - alphaCoeff
+    alphaSquared  = alphaCoeff * alphaCoeff
+    alphaCubed    = alphaCoeff * alphaCoeff * alphaCoeff
+    alpha4        = alphaCoeff * alphaCoeff * alphaCoeff * alphaCoeff
+    omaSquared    = oneMinusAlpha * oneMinusAlpha
+    omaCubed      = omaSquared * oneMinusAlpha
+    oma4          = omaCubed * oneMinusAlpha
+
+    if filterLevel == 1
+        runningFilterValue := alphaCoeff * dataIn +
+                              oneMinusAlpha * nz(runningFilterValue[1])
+    else if filterLevel == 2
+        runningFilterValue := alphaSquared * dataIn
+                              + 2.0 * oneMinusAlpha * nz(runningFilterValue[1])
+                              - omaSquared * nz(runningFilterValue[2])
+    else if filterLevel == 3
+        runningFilterValue := alphaCubed * dataIn
+                              + 3.0 * oneMinusAlpha * nz(runningFilterValue[1])
+                              - 3.0 * omaSquared * nz(runningFilterValue[2])
+                              + omaCubed * nz(runningFilterValue[3])
+    else if filterLevel == 4
+        runningFilterValue := alpha4 * dataIn
+                              + 4.0 * oneMinusAlpha * nz(runningFilterValue[1])
+                              - 6.0 * omaSquared * nz(runningFilterValue[2])
+                              + 4.0 * omaCubed * nz(runningFilterValue[3])
+                              - oma4 * nz(runningFilterValue[4])
+    runningFilterValue
+
+custom_supertrend(src, factor, p) =>
+    atr = ta.atr(p)
+    upperBand = src + factor * atr
+    lowerBand = src - factor * atr
+    prevLowerBand = nz(lowerBand[1])
+    prevUpperBand = nz(upperBand[1])
+    lowerBand := lowerBand > prevLowerBand or src[1] < prevLowerBand ? lowerBand : prevLowerBand
+    upperBand := upperBand < prevUpperBand or src[1] > prevUpperBand ? upperBand : prevUpperBand
+    int _direction = na
+    float superTrend = na
+    prevSuperTrend = superTrend[1]
+    if na(atr[1])
+        _direction := 1
+    else if prevSuperTrend == prevUpperBand
+        _direction := src > upperBand ? -1 : 1
+    else
+        _direction := src < lowerBand ? 1 : -1
+    superTrend := _direction == -1 ? lowerBand : upperBand
+    [superTrend, _direction]
+
+// Main calculations
+alphaValue = calcGaussianAlpha(period, poles)
+gmaOutput = gaussianSmooth(close, poles, alphaValue)
+final = ta.linreg(gmaOutput, smooth_len, smooth_offset)
+
+[st, dir] = custom_supertrend(final, 0.15, 21)
+trend = final > final[1] ? 1 : -1
+signal = final > st ? 1 : -1
+range_market = (trend * signal < 0)
+
+z = 33
+s_vol = ta.hma((volume - ta.lowest(volume, z)) / (ta.highest(volume, z) - ta.lowest(volume, z)), 4)
+transparency_ = math.min(100 - s_vol * 100, vol_sensitivity)
+dist = ta.sma(math.abs(close - open), 100)
+
+// Plotting
+plot_color = range_market and extra_signals ? color.gray : signal > 0 ? color.new(bull_color, vol_highlight ? transparency_ : 50) : color.new(bear_color, vol_highlight ? transparency_ : 50)
+main_plot = plot(final, color=plot_color, linewidth=3)
+
+upper_plot = plot(show_bands ? (signal > 0 ? final + dist * 2 : na) : na, style=plot.style_linebr, color=color.new(bull_color, 90))
+lower_plot = plot(show_bands ? (signal < 0 ? final - dist * 2 : na) : na, style=plot.style_linebr, color=color.new(bear_color, 90))
+
+fill(main_plot, upper_plot, color=color.new(range_market and extra_signals ? color.gray : bull_color, vol_highlight ? transparency_ : 50))
+fill(main_plot, lower_plot, color=color.new(range_market and extra_signals ? color.gray : bear_color, vol_highlight ? transparency_ : 50))
+
+// Signals and coloring (bullish and bearish signals turned off)
+barcolor(color_bars ? range_market and extra_signals ? color.gray : signal > 0 ? color.new(bull_color, vol_highlight ? transparency_ : 50) : color.new(bear_color, vol_highlight ? transparency_ : 50) : na)
+
+// Table
+if barstate.islast and enable_table
+    t_size = table_size == "Tiny" ? size.tiny : table_size == "Small" ? size.small : table_size == "Medium" ? size.normal : size.large
+    t = table.new(position.top_right, 2, extra_signals ? 6 : 7, bgcolor=chart.bg_color, border_width=1)
+    table.cell(t, 0, 0, "Timeframe", text_halign=text.align_center, text_color=chart.fg_color, text_size=t_size)
+    table.cell(t, 1, 0, "Signal", text_halign=text.align_center, text_color=chart.fg_color, text_size=t_size)
+    
+    for i = 1 to 5
+        tf = array.get(array.from(tf1, tf2, tf3, tf4, tf5), i-1)
+        s = request.security(syminfo.tickerid, tf, range_market and extra_signals ? 0 : signal > 0 ? 1 : -1)
+        sig = s == 1 ? "Bullish" : s == -1 ? "Bearish" : "Ranging"
+        table.cell(t, 0, i, tf, text_halign=text.align_center, text_color=chart.fg_color, text_size=t_size)
+        table.cell(t, 1, i, sig, text_halign=text.align_center, text_color=chart.fg_color, bgcolor=s == 1 ? color.new(bull_color, 70) : s == -1 ? color.new(bear_color, 70) : color.new(color.gray, 70), text_size=t_size)
+    
+    if not extra_signals
+        table.cell(t, 0, 6, "Note", text_halign=text.align_center, text_color=chart.fg_color, text_size=t_size)
+        table.cell(t, 1, 6, "Extra signals disabled", text_halign=text.align_center, text_color=chart.fg_color, text_size=t_size)
+
+// Alerts
+alertcondition(range_market and extra_signals, title="Ranging Market", message="Ranging market detected.")

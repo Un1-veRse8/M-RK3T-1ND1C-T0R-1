@@ -1,0 +1,125 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=5
+indicator("Spectral Order Flow Resonance (SOFR)", overlay=false, precision=3)
+
+// === INPUTS (ONE-LINERS) ===
+fft_length = input.int(64, "FFT Window Length", minval=32, maxval=256, step=32, tooltip="Sets the number of bars used for the Fast Fourier Transform (FFT) window. Larger values smooth the frequency analysis but may lag more. Use higher values for less noise, lower for more sensitivity.")
+order_flow_period = input.int(14, "Order Flow Calculation Period", minval=5, maxval=50, tooltip="Number of bars for calculating the order flow mean and standard deviation. Shorter periods react faster to changes, longer periods provide smoother signals.")
+fib_freq_1 = input.int(5, "Fibonacci Frequency 1", minval=2, maxval=21, tooltip="First frequency (in bars) for spectral analysis, typically a Fibonacci number. Adjust to focus on different cycle lengths in the order flow.")
+fib_freq_2 = input.int(8, "Fibonacci Frequency 2", minval=2, maxval=21, tooltip="Second frequency (in bars) for spectral analysis, typically a Fibonacci number. Adjust to focus on different cycle lengths in the order flow.")
+fib_freq_3 = input.int(13, "Fibonacci Frequency 3", minval=2, maxval=21, tooltip="Third frequency (in bars) for spectral analysis, typically a Fibonacci number. Adjust to focus on different cycle lengths in the order flow.")
+resonance_threshold = input.float(2.5, "Resonance Threshold (StdDev)", minval=1.0, maxval=5.0, step=0.1, tooltip="Sets how many standard deviations above the average a frequency's magnitude must be to be considered in resonance. Lower values make resonance easier to trigger, higher values make it stricter.")
+smoothing = input.int(3, "Signal Smoothing", minval=1, maxval=10, tooltip="Smooths the magnitude of each frequency component. Higher values reduce noise but may delay signals.")
+amplify = input.float(10, "Amplify Display", minval=1, maxval=100, step=1, tooltip="Multiplies the plotted spectral lines for better visibility. Increase if lines are too flat, decrease if they are too large.")
+showDashboard = input.bool(true, "Show Dashboard", tooltip="Toggle to display or hide the SOFR Dashboard table on the chart, which summarizes key regime and spectral metrics.")
+showInfoLine = input.bool(true, "Show Info Line", tooltip="Toggle to display or hide the info label at the top of the chart, which gives a quick summary of the current regime and spectral state.")
+
+// === ORDER FLOW ===
+buy_pressure  = close > open ? volume * (close - low) / (high - low) : 0
+sell_pressure = close < open ? volume * (high - close) / (high - low) : 0
+order_flow_raw = buy_pressure - sell_pressure
+order_flow_mean = ta.sma(order_flow_raw, order_flow_period)
+order_flow_stdev = ta.stdev(order_flow_raw, order_flow_period)
+order_flow_normalized = order_flow_stdev != 0 ? (order_flow_raw - order_flow_mean) / order_flow_stdev : 0
+
+// === FFT/DFT ===
+calculate_frequency_component(data, frequency, length) =>
+    sum_real = 0.0
+    sum_imag = 0.0
+    for i = 0 to length - 1
+        angle = -2 * math.pi * frequency * i / length
+        sum_real := sum_real + data[i] * math.cos(angle)
+        sum_imag := sum_imag + data[i] * math.sin(angle)
+    magnitude = math.sqrt(sum_real * sum_real + sum_imag * sum_imag) / length
+    phase = math.atan(sum_imag / sum_real)
+    [magnitude, phase]
+
+[mag_5, phase_5]   = calculate_frequency_component(order_flow_normalized, fib_freq_1, fft_length)
+[mag_8, phase_8]   = calculate_frequency_component(order_flow_normalized, fib_freq_2, fft_length)
+[mag_13, phase_13] = calculate_frequency_component(order_flow_normalized, fib_freq_3, fft_length)
+[mag_21, phase_21] = calculate_frequency_component(order_flow_normalized, 21, fft_length)
+
+mag_5_smooth   = ta.sma(mag_5, smoothing)
+mag_8_smooth   = ta.sma(mag_8, smoothing)
+mag_13_smooth  = ta.sma(mag_13, smoothing)
+mag_21_smooth  = ta.sma(mag_21, smoothing)
+
+// === SPECTRAL ENERGY & RESONANCE ===
+total_energy   = mag_5_smooth + mag_8_smooth + mag_13_smooth + mag_21_smooth
+avg_magnitude  = ta.sma(total_energy / 4, 50)
+std_magnitude  = ta.stdev(total_energy / 4, 50)
+
+resonance_5    = (mag_5_smooth - avg_magnitude) / std_magnitude
+resonance_8    = (mag_8_smooth - avg_magnitude) / std_magnitude
+resonance_13   = (mag_13_smooth - avg_magnitude) / std_magnitude
+
+harmonic_alignment = (resonance_5 > resonance_threshold ? 1 : 0) + (resonance_8 > resonance_threshold ? 1 : 0) + (resonance_13 > resonance_threshold ? 1 : 0)
+phase_coherence = math.abs(math.cos(phase_5 - phase_8)) + math.abs(math.cos(phase_8 - phase_13)) + math.abs(math.cos(phase_5 - phase_13))
+phase_coherence_normalized = phase_coherence / 3
+
+// === DOMINANT FREQUENCY ===
+max_mag = math.max(mag_5_smooth, math.max(mag_8_smooth, math.max(mag_13_smooth, mag_21_smooth)))
+dominant_freq = mag_5_smooth == max_mag ? fib_freq_1 : mag_8_smooth == max_mag ? fib_freq_2 : mag_13_smooth == max_mag ? fib_freq_3 : 21
+energy_concentration = max_mag / (total_energy / 4)
+
+// === SIGNALS & REGIME ===
+order_flow_momentum = ta.sma(order_flow_normalized, 3)
+buy_condition  = harmonic_alignment >= 2 and phase_coherence_normalized > 0.7 and order_flow_momentum > order_flow_momentum[1] and energy_concentration > 1.5
+sell_condition = harmonic_alignment >= 2 and phase_coherence_normalized > 0.7 and order_flow_momentum < order_flow_momentum[1] and energy_concentration > 1.5
+regime_state   = buy_condition ? "Bullish" : sell_condition ? "Bearish" : "Neutral"
+
+// === VISUALIZATION ===
+bgcolor(buy_condition ? color.new(color.green, 85) : sell_condition ? color.new(color.red, 85) : na)
+
+// -- Plot Only Dominant Frequency Bold, Others Faded --
+plot(mag_5_smooth * amplify,   title="5-Period",  color=dominant_freq == fib_freq_1 ? color.blue   : color.new(color.blue, 80),   linewidth=3)
+plot(mag_8_smooth * amplify,   title="8-Period",  color=dominant_freq == fib_freq_2 ? color.green  : color.new(color.green, 80),  linewidth=3)
+plot(mag_13_smooth * amplify,  title="13-Period", color=dominant_freq == fib_freq_3 ? color.orange : color.new(color.orange, 80), linewidth=3)
+plot(mag_21_smooth * amplify,  title="21-Period", color=dominant_freq == 21        ? color.purple : color.new(color.purple, 80), linewidth=3)
+
+// -- Plot Order Flow Oscillator (faded) --
+plot(order_flow_normalized * avg_magnitude / 2, title="Order Flow Imbalance", color=color.new(color.white, 85), style=plot.style_area, linewidth=1)
+
+// -- Plot Dynamic Resonance Threshold and Average Magnitude --
+plot(avg_magnitude + (resonance_threshold * std_magnitude), title="Resonance Threshold", color=color.red, linewidth=1, style=plot.style_linebr)
+plot(avg_magnitude, title="Average Magnitude", color=color.gray, linewidth=1, style=plot.style_linebr)
+
+// -- Buy/Sell Signals (only first in a sequence) --
+buy_signal  = buy_condition  and not buy_condition[1]
+sell_signal = sell_condition and not sell_condition[1]
+plotshape(buy_signal,  title="BUY",  style=shape.triangleup,   location=location.bottom, color=color.green, size=size.tiny, text="BUY")
+plotshape(sell_signal, title="SELL", style=shape.triangledown, location=location.top,    color=color.red,   size=size.tiny, text="SELL")
+
+// === DASHBOARD (DYNAMIC COLOR CODING, ONE-LINERS) ===
+if showDashboard
+    var table dash = table.new(position.middle_right, 1, 6, bgcolor=color.new(color.black, 90), border_color=color.new(color.yellow, 80), border_width=1)
+    if barstate.islast
+        table.clear(dash, 0, 0)
+        regime_color = regime_state == "Bullish" ? color.green : regime_state == "Bearish" ? color.red : color.gray
+        dom_color = dominant_freq == fib_freq_1 ? color.blue : dominant_freq == fib_freq_2 ? color.green : dominant_freq == fib_freq_3 ? color.orange : color.purple
+        align_color = harmonic_alignment == 3 ? color.green : harmonic_alignment == 2 ? color.yellow : color.gray
+        phase_color = phase_coherence_normalized > 0.8 ? color.green : phase_coherence_normalized > 0.6 ? color.yellow : color.gray
+        energy_color = energy_concentration > 1.5 ? color.green : energy_concentration > 1.2 ? color.yellow : color.gray
+        table.cell(dash, 0, 0, "⚡Spectral Order Flow Resonance", text_color=color.yellow, text_size=size.normal, bgcolor=color.new(color.black, 0))
+        table.cell(dash, 0, 1, "Regime: " + regime_state, text_color=regime_color, text_size=size.small)
+        table.cell(dash, 0, 2, "Dominant Freq: " + str.tostring(dominant_freq), text_color=dom_color, text_size=size.small)
+        table.cell(dash, 0, 3, "Harmonic Align: " + str.tostring(harmonic_alignment) + "/3", text_color=align_color, text_size=size.small)
+        table.cell(dash, 0, 4, "Phase Coh.: " + str.tostring(phase_coherence_normalized * 100, "#.#") + "%", text_color=phase_color, text_size=size.small)
+        table.cell(dash, 0, 5, "Energy Conc.: " + str.tostring(energy_concentration, "#.##"), text_color=energy_color, text_size=size.small)
+
+// === INFO LINE (UNIQUE STYLE) ===
+var label infoLabel = na
+if showInfoLine and barstate.islast
+    label.delete(infoLabel)
+    info = "SOFR Regime: " + regime_state + " | " +
+           "DomFreq: " + str.tostring(dominant_freq) + " | " +
+           "Align: " + str.tostring(harmonic_alignment) + "/3 | " +
+           "Phase: " + str.tostring(phase_coherence_normalized * 100, "#.#") + "% | " +
+           "Energy: " + str.tostring(energy_concentration, "#.##")
+    infoLabel := label.new(bar_index, max_mag * 1.2, info, color=color.new(color.black, 80), textcolor=color.yellow, style=label.style_label_left, size=size.normal)
+
+// === ALERTS ===
+alertcondition(buy_signal,  "SOFR Buy Signal",  "Spectral Order Flow Resonance Buy Signal")
+alertcondition(sell_signal, "SOFR Sell Signal", "Spectral Order Flow Resonance Sell Signal")
