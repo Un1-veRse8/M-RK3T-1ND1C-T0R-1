@@ -1,0 +1,144 @@
+//══════════════════════════════════════════════════════════════════════════════
+// ►►►►►►►►►►►►►►►►►►►►► CREDITS & COPYRIGHT ◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄
+//══════════════════════════════════════════════════════════════════════════════
+//
+//   SCRIPT NAME    : Slope Change Rate Volume Confirmation
+//   AUTHOR         : mastertop
+//   VERSION        : 1.0 // Initial version of this indicator
+//   RELEASE DATE   : 2025-05-08
+//
+//   TWITTER        : https://x.com/Top_Astray
+//
+//══════════════════════════════════════════════════════════════════════════════
+// ►►►►►►►►►►►►►►►►►►►►►►►►► LICENSE ◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄◄
+//══════════════════════════════════════════════════════════════════════════════
+//
+//   This source code is subject to the terms of the Mozilla Public License 2.0
+//   at https://mozilla.org/MPL/2.0/
+//
+//   © mastertop, 2025
+//
+//══════════════════════════════════════════════════════════════════════════════
+
+//@version=6
+indicator("Adaptive Hurst Exponent Regime Filter", shorttitle="AHERF", overlay=false) 
+import MASTERTOP_ASTRAY/MaterialPalette/2 as colour 
+// ————— Constants —————
+color TRENDING_COLOR = colour.green(13,3,80)
+color MEAN_REVERTING_COLOR = colour.red(13,3,80)
+color RANDOM_WALK_COLOR = color.new(color.gray, 80)
+
+// ————— Inputs —————
+// Group: Hurst Calculation Settings
+string grp1Title = "Hurst Exponent Calculation"
+int hurstLookbackInput = input.int(100, "Hurst Lookback Period", minval=20, group=grp1Title)
+// TODO: Add inputs for sub-period selection if using variance scaling
+
+// Group: Adaptive Threshold Settings
+string grp2Title = "Adaptive Threshold Settings"
+string volatilityMetricInput = input.string("ATR", "Volatility Metric", options=["ATR", "StdDev"], group=grp2Title)
+int volatilityLookbackInput = input.int(20, "Volatility Lookback", minval=1, group=grp2Title)
+float sensitivityInput = input.float(0.1, "Threshold Sensitivity (k)", minval=0, step=0.01, group=grp2Title)
+float bufferInput = input.float(0.05, "Threshold Buffer", minval=0, step=0.01, group=grp2Title)
+// TODO: Add inputs for short/long vol lookbacks if using ratio
+
+// ————— Function Declarations —————
+// @function        Calculates the approximate Hurst Exponent using variance scaling.
+// @param series    The input data series (e.g., log returns).
+// @param lookback  The main lookback period for Hurst calculation.
+// @returns         The approximate Hurst exponent value.
+calculateHurst(series, lookback) =>
+    // --- Implementation Ideas for Variance Scaling ---
+    // 1. Define sub-periods (e.g., lookback/4, lookback/2, lookback)
+    int n1 = math.max(5, int(lookback / 4)) // Ensure min length
+    int n2 = math.max(10, int(lookback / 2))
+    int n3 = lookback
+
+    // 2. Calculate log returns if not already provided (or use price changes)
+    //    For simplicity, let's assume 'series' is already log returns or price changes
+    //    float logReturn = math.log(close) - math.log(close[1])
+
+    // 3. Calculate std dev of the series over these sub-periods
+    float stdDev1 = ta.stdev(series, n1)
+    float stdDev2 = ta.stdev(series, n2)
+    float stdDev3 = ta.stdev(series, n3)
+
+    // 4. Check for non-zero std devs to avoid log(0)
+    if stdDev1 <= 0 or stdDev2 <= 0 or stdDev3 <= 0
+        na // Not enough volatility or data
+    else
+        // 5. Perform log-log regression (simplified: slope between points)
+        //    Points: (log(n1), log(stdDev1)), (log(n2), log(stdDev2)), (log(n3), log(stdDev3))
+        float logN1 = math.log(n1)
+        float logN3 = math.log(n3)
+        float logStdDev1 = math.log(stdDev1)
+        float logStdDev3 = math.log(stdDev3)
+
+        // Hurst Exponent (H) is the slope of log(StdDev) vs log(Period)
+        // H = (log(StdDev3) - log(StdDev1)) / (log(N3) - log(N1))
+        float hurst = (logStdDev3 - logStdDev1) / (logN3 - logN1)
+        hurst 
+        // Values typically range from 0 to 1.
+
+// @function        Calculates the volatility proxy.
+// @param metric    The chosen volatility metric ("ATR", "StdDev").
+// @param lookback  The lookback period for the volatility calculation.
+// @returns         The volatility proxy value.
+getVolatilityProxy(string metric, int lookback) =>
+    float result = na
+    float priceReturns = (close - close[1]) / close[1] // Simple returns for StdDev
+    if metric == "ATR"
+        result := ta.atr(lookback) / close // Normalize ATR
+    else if metric == "StdDev"
+        result := ta.stdev(priceReturns, lookback)
+    result
+
+// ————— Calculations —————
+// 1. Prepare data for Hurst (e.g., log price changes)
+float logPriceChange = math.log(close) - math.log(close[1]) // Using log changes for H
+if bar_index < 1 // Avoid error on the first bar
+    logPriceChange := 0.0
+
+// 2. Calculate Hurst Exponent
+float hurstValue = calculateHurst(logPriceChange, hurstLookbackInput)
+
+// 3. Calculate Volatility Proxy
+float volatilityProxy = getVolatilityProxy(volatilityMetricInput, volatilityLookbackInput)
+
+// 4. Calculate Dynamic Threshold
+float adaptiveThreshold = 0.5 + sensitivityInput * nz(volatilityProxy, 0.0) // nz to handle potential na at the start
+
+// 5. Determine Regime
+color currentRegimeColor = RANDOM_WALK_COLOR
+string regimeText = "Random/Transition"
+
+if not na(hurstValue) and not na(adaptiveThreshold)
+    if hurstValue > adaptiveThreshold + bufferInput
+        currentRegimeColor := TRENDING_COLOR
+        regimeText := "Trending"
+    else if hurstValue < adaptiveThreshold - bufferInput
+        currentRegimeColor := MEAN_REVERTING_COLOR
+        regimeText := "Mean-Reverting"
+
+// ————— Visuals —————
+// Plot Hurst Exponent
+plot(hurstValue, "Hurst Exponent (H)", color=color.white, linewidth=2)
+// Plot Adaptive Threshold
+plot(adaptiveThreshold, "Adaptive Threshold", color=color.orange, linewidth=2)
+// Plot 0.5 line for reference
+hline(0.5, "Fixed 0.5 Level", color=color.gray, linestyle=hline.style_dashed)
+
+// Background Color
+bgcolor(currentRegimeColor)
+// ————— Alerts —————
+bool trendEntry = hurstValue > adaptiveThreshold + bufferInput and (hurstValue[1] <= adaptiveThreshold[1] + bufferInput[1] or na(hurstValue[1]))
+bool meanRevertEntry = hurstValue < adaptiveThreshold - bufferInput and (hurstValue[1] >= adaptiveThreshold[1] - bufferInput[1] or na(hurstValue[1]))
+bool randomEntry = hurstValue >= adaptiveThreshold - bufferInput and hurstValue <= adaptiveThreshold + bufferInput and not (hurstValue[1] >= adaptiveThreshold[1] - bufferInput[1] and hurstValue[1] <= adaptiveThreshold[1] + bufferInput[1] or na(hurstValue[1]))
+
+plotshape(trendEntry, "trend Entry", style = shape.labelup, location = location.belowbar,text = "T",textcolor = color.white, color = colour.green(13,3), force_overlay = true )
+plotshape(meanRevertEntry, "meanRevert Entry", style = shape.labelup, location = location.belowbar,text = "M",textcolor = color.white, color = colour.teal(13,3), force_overlay = true )
+plotshape(randomEntry, "random Entry", style = shape.labelup, location = location.belowbar,text = "R",textcolor = color.white, color = colour.cyan(13,3), force_overlay = true )
+
+alertcondition(trendEntry, title="Regime Shift to Trending", message="Hurst crossed above adaptive threshold into Trending.")
+alertcondition(meanRevertEntry, title="Regime Shift to Mean-Reverting", message="Hurst crossed below adaptive threshold into Mean-Reverting.")
+alertcondition(randomEntry, title="Regime Shift to Random/Transition", message="Hurst entered Random/Transition zone around adaptive threshold.")

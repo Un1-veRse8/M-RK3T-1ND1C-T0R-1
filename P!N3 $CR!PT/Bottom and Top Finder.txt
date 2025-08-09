@@ -1,0 +1,145 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TheUltimator5
+// @description
+// 📉 **Bottom and Top Finder** is a multi-symbol momentum divergence detector designed to identify potential **market bottoms and tops**. 
+// It compares the +DI and -DI directional movement values of the current chart with up to **three reference symbols** (e.g., RSP, HYG, DXY).
+// The logic uses log-normalized percent changes to create scale-invariant comparisons, making this tool useful across assets of all prices.
+// 🔍 When the current asset diverges from the strength or weakness of the broader market, it may signal a **reversal zone**.
+// Background highlights occur when threshold conditions are met for either:
+//  - **Bottoms** (oversold exhaustion, underperformance)
+//  - **Tops** (overbought exhaustion, underperformance)
+//
+// 🛠️ **Configurable Parameters**:
+// - Up to 3 reference symbols
+// - Adjustable weighting per symbol
+// - Thresholds for bottom/top signal triggers
+// - Optional table for visual feedback
+
+
+//@version=6
+indicator("Bottom and Top finder [theUltimator5]", overlay=false)
+
+// === INPUTS ===
+diLengthBot = input(5, title="Smoothing Length Bot")
+diLengthTop = input(5, title="Smoothing Length Top")
+symbol1 = input("rsp", title="First Reference Symbol")
+symbol2 = input("hyg", title="Second Reference Symbol")
+symbol3 = input("dxy", title="Third Reference Symbol")
+
+sym1Mult = input(1, title="Symbol 1 Influence")
+sym2Mult = input(2, title="Symbol 2 Influence")
+sym3Mult = input(1, title="Symbol 3 Influence")
+
+highlightInput = input.bool(true, title="Highlight Background on Trigger?")
+ma_length = input(20, title="Moving Average Length for Trigger")
+thresholdBot = input(0.65, title="Bot Trigger Threshold")
+thresholdTop = input(0.65, title="Top Trigger Threshold")
+threshold2 = 1.8
+
+showTable = input.bool(true, "Show Selection on Chart?")
+showBot = input.bool(true, "Show Bottom Line?")
+showTop = input.bool(true, "Show Top Line?")
+
+// === DISPLAY TABLE ===
+var table mcTable = table.new(position.top_left, columns=2, rows=4, border_width=1, border_color=color.new(color.blue, 100))
+if showTable
+    table.cell(mcTable, 0, 0, "Symbols", bgcolor=color.new(color.maroon, 20), text_color=color.white, text_size=size.tiny)
+    table.cell(mcTable, 1, 0, "Influence", bgcolor=color.new(color.maroon, 20), text_color=color.white, text_size=size.tiny)
+    table.cell(mcTable, 0, 1, symbol1, bgcolor=color.new(color.yellow, 20), text_color=color.black, text_size=size.tiny)
+    table.cell(mcTable, 1, 1, str.tostring(sym1Mult), bgcolor=color.new(color.yellow, 20), text_color=color.black, text_size=size.tiny)
+    table.cell(mcTable, 0, 2, symbol2, bgcolor=color.new(color.yellow, 20), text_color=color.black, text_size=size.tiny)
+    table.cell(mcTable, 1, 2, str.tostring(sym2Mult), bgcolor=color.new(color.yellow, 20), text_color=color.black, text_size=size.tiny)
+    table.cell(mcTable, 0, 3, symbol3, bgcolor=color.new(color.yellow, 20), text_color=color.black, text_size=size.tiny)
+    table.cell(mcTable, 1, 3, str.tostring(sym3Mult), bgcolor=color.new(color.yellow, 20), text_color=color.black, text_size=size.tiny)
+
+// === UTILITY FUNCTIONS ===
+safeLog(x) => na(x) or x <= 0 ? na : math.log(x)
+
+f_plusDI(_high, _low, _close, _length) =>
+    upMove_pct = safeLog(_high / _high[1])
+    downMove_pct = safeLog(_low[1] / _low)
+    plusDM = (upMove_pct > downMove_pct and upMove_pct > 0) ? upMove_pct : 0
+    highLow = safeLog(_high / _low)
+    highClose = math.abs(safeLog(_high / _close[1]))
+    lowClose = math.abs(safeLog(_low / _close[1]))
+    tr_pct = math.max(math.max(highLow, highClose), lowClose)
+    smoothedPlusDM = ta.rma(plusDM, _length)
+    smoothedTR = ta.rma(tr_pct, _length)
+    100 * smoothedPlusDM / smoothedTR
+
+f_minusDI(_high, _low, _close, _length) =>
+    upMove_pct = safeLog(_high / _high[1])
+    downMove_pct = safeLog(_low[1] / _low)
+    minusDM = (downMove_pct > upMove_pct and downMove_pct > 0) ? downMove_pct : 0
+    highLow = safeLog(_high / _low)
+    highClose = math.abs(safeLog(_high / _close[1]))
+    lowClose = math.abs(safeLog(_low / _close[1]))
+    tr_pct = math.max(math.max(highLow, highClose), lowClose)
+    smoothedMinusDM = ta.rma(minusDM, _length)
+    smoothedTR = ta.rma(tr_pct, _length)
+    100 * smoothedMinusDM / smoothedTR
+
+// === CURRENT SYMBOL CALCULATIONS ===
+plusDI_current = f_plusDI(high, low, close, diLengthBot)
+minusDI_current = f_minusDI(high, low, close, diLengthTop)
+
+// === REFERENCE SYMBOL CALCULATIONS ===
+high_sym1 = request.security(symbol1, timeframe.period, high, lookahead=barmerge.lookahead_on, gaps=barmerge.gaps_off)
+low_sym1 = request.security(symbol1, timeframe.period, low, lookahead=barmerge.lookahead_on, gaps=barmerge.gaps_off)
+close_sym1 = request.security(symbol1, timeframe.period, close, lookahead=barmerge.lookahead_on, gaps=barmerge.gaps_off)
+plusDI_sym1 = math.sqrt(f_plusDI(high_sym1, low_sym1, close_sym1, diLengthBot)) * sym1Mult
+minusDI_sym1 = math.sqrt(f_minusDI(high_sym1, low_sym1, close_sym1, diLengthTop)) * sym1Mult
+
+high_sym2 = request.security(symbol2, timeframe.period, high, lookahead=barmerge.lookahead_on, gaps=barmerge.gaps_off)
+low_sym2 = request.security(symbol2, timeframe.period, low, lookahead=barmerge.lookahead_on, gaps=barmerge.gaps_off)
+close_sym2 = request.security(symbol2, timeframe.period, close, lookahead=barmerge.lookahead_on, gaps=barmerge.gaps_off)
+plusDI_sym2 = math.sqrt(f_plusDI(high_sym2, low_sym2, close_sym2, diLengthBot)) * sym2Mult
+minusDI_sym2 = math.sqrt(f_minusDI(high_sym2, low_sym2, close_sym2, diLengthTop)) * sym2Mult
+
+high_sym3 = request.security(symbol3, timeframe.period, high)
+low_sym3 = request.security(symbol3, timeframe.period, low)
+close_sym3 = request.security(symbol3, timeframe.period, close)
+plusDI_sym3 = math.sqrt(f_plusDI(high_sym3, low_sym3, close_sym3, diLengthBot)) * sym3Mult
+minusDI_sym3 = math.sqrt(f_minusDI(high_sym3, low_sym3, close_sym3, diLengthTop)) * sym3Mult
+
+// === RATIOS ===
+pDI1_ratio = plusDI_sym1 / plusDI_current
+pDI2_ratio = plusDI_sym2 / plusDI_current
+pDI3_ratio = plusDI_sym3 / plusDI_current
+
+mDI1_ratio = minusDI_sym1 / minusDI_current
+mDI2_ratio = minusDI_sym2 / minusDI_current
+mDI3_ratio = minusDI_sym3 / minusDI_current
+
+botLine = (pDI1_ratio + pDI2_ratio + pDI3_ratio) / (sym1Mult + sym2Mult + sym3Mult)
+topLine = (mDI1_ratio + mDI2_ratio + mDI3_ratio) / (sym1Mult + sym2Mult + sym3Mult)
+
+botLineColor = botLine > thresholdBot * 2 ? color.rgb(255, 0, 0) : botLine > thresholdBot ? color.rgb(255, 156, 6) : color.rgb(91, 193, 234)
+topLineColor = topLine > thresholdTop * 2 ? color.rgb(8, 137, 75) : topLine > thresholdTop ? color.rgb(244, 244, 41) : color.rgb(239, 172, 225)
+
+plot(showBot ? -botLine : na, title="Bot", color=botLineColor, linewidth=1)
+plot(showTop ? topLine : na, title="Top", color=topLineColor, linewidth=1)
+
+// === MOVING AVERAGES ===
+botMA = ta.sma(botLine, ma_length)
+topMA = ta.sma(topLine, ma_length)
+botDiff = botLine / botMA
+topDiff = topLine / topMA
+
+// === HIGHLIGHTS ===
+botTrigger = botLine > thresholdBot and botDiff > threshold2
+topTrigger = topLine > thresholdTop and topDiff > threshold2
+
+bgcolor(botTrigger and highlightInput ? color.new(#e2a1a1, 85) : na)
+bgcolor(topTrigger and highlightInput ? color.new(#64dc8a, 85) : na)
+
+// === REFERENCE LINES ===
+hline(0, color=color.gray, linestyle=hline.style_dashed)
+hline(thresholdTop, color=color.gray, linestyle=hline.style_dashed)
+hline(-thresholdBot, color=color.gray, linestyle=hline.style_dashed)
+
+// === ALERT CONDITIONS ===
+alertcondition(botTrigger, title="Bottom Trigger", message="Bottom Trigger")
+alertcondition(botLine > thresholdBot, title="Bottom Threshold Crossed", message="Bottom Threshold Crossed")
+alertcondition(topTrigger, title="Top Trigger", message="Top Trigger")
+alertcondition(topLine > thresholdTop, title="Top Threshold Crossed", message="Top Threshold Crossed")

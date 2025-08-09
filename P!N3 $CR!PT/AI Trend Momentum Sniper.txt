@@ -1,0 +1,47 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © crypto_zil
+
+//@version=5
+indicator("AI Trend Momentum Sniper", overlay=true)
+
+// Supertrend Settings
+atrLength = 10
+factor = 3.0
+[supertrend, direction] = ta.supertrend(factor, atrLength)
+
+// MACD Settings
+[macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
+
+// RSI Settings
+rsiLength = 14
+rsi = ta.rsi(close, rsiLength)
+
+// ATR Volatility Filter
+atr = ta.atr(14)
+volatilityThreshold = ta.sma(atr, 10)
+
+// On-Balance Volume (OBV) Fix
+deltaVolume = volume * math.sign(ta.change(close))
+obv = ta.cum(deltaVolume)
+obvSignal = ta.sma(obv, 10)
+
+// Buy Signal Conditions
+buyCondition = (direction == 1) and (macdLine > signalLine) and (rsi > 50 and rsi < 70) and (atr > volatilityThreshold) and (obv > obvSignal)
+
+// Sell Signal Conditions
+sellCondition = (direction == -1) and (macdLine < signalLine) and (rsi < 50 and rsi > 30) and (atr > volatilityThreshold) and (obv < obvSignal)
+
+// Stop-Loss based on ATR
+stopLoss = close - (atr * 1.5)
+takeProfit = close + (atr * 2.0)
+
+// Plot Buy/Sell Signals
+plotshape(buyCondition, location=location.belowbar, color=color.green, style=shape.labelup, title="BUY")
+plotshape(sellCondition, location=location.abovebar, color=color.red, style=shape.labeldown, title="SELL")
+
+// Plot Supertrend
+plot(supertrend, color=direction == 1 ? color.green : color.red, title="Supertrend")
+
+// Alerts
+alertcondition(buyCondition, title="BUY ALERT", message="Buy Signal - AI Trend Momentum Sniper")
+alertcondition(sellCondition, title="SELL ALERT", message="Sell Signal - AI Trend Momentum Sniper")

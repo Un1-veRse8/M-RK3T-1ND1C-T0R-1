@@ -1,0 +1,108 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © RWCS_LTD
+
+//@version=6
+indicator("Adaptive RSI Oscillator", overlay=false, max_bars_back=500)
+
+// === USER SETTINGS ===
+minLen     = input.int(2,  "Minimum Lookback", minval=1, maxval=100)
+maxLen     = input.int(50, "Maximum Lookback", minval=1, maxval=500)
+step       = input.int(2,   "Optimization Step", minval=1, maxval=50)
+
+// === RETURN CALCULATION ===
+ret = (close / close[1]) - 1
+
+// === CUSTOM FUNCTIONS ===
+custom_rsi(src, len) =>
+    float result = na
+    if bar_index >= len and len >= 2
+        gain = 0.0
+        loss = 0.0
+        for i = 1 to len
+            change = src[i - 1] - src[i]
+            gain := gain + math.max(change, 0)
+            loss := loss + math.max(-change, 0)
+        rs = loss == 0 ? 100 : gain / loss
+        result := 100 - (100 / (1 + rs))
+    result
+
+custom_sma(src, len) =>
+    float result = na
+    if bar_index >= len and len >= 1
+        sum = 0.0
+        for i = 0 to len - 1
+            sum := sum + src[i]
+        result := sum / len
+    result
+
+custom_stdev(src, len) =>
+    float result = na
+    if bar_index >= len and len >= 2
+        mean = custom_sma(src, len)
+        sumSq = 0.0
+        for i = 0 to len - 1
+            sumSq := sumSq + math.pow(src[i] - mean, 2)
+        result := math.sqrt(sumSq / len)
+    result
+
+percentile_rank(src, len) =>
+    count = 0.0
+    for i = 0 to len - 1
+        count := count + (src[i] < src[0] ? 1 : 0)
+    count / len
+
+amplify(x, power) =>
+    sign = x > 0 ? 1 : x < 0 ? -1 : 0
+    sign * math.pow(math.abs(x), power)
+
+// === DYNAMIC LOOKBACK OPTIMIZATION ===
+int bestLen = minLen
+if bar_index >= (maxLen + step)
+    float bestStability = 999.0
+    for len = minLen to maxLen by step
+        stdNow = custom_stdev(ret, len)
+        stdPrev = custom_stdev(ret, len - step)
+        if not na(stdNow) and not na(stdPrev)
+            diff = math.abs(stdNow - stdPrev)
+            if diff < bestStability
+                bestStability := diff
+                bestLen := len
+
+// === ADAPTIVE RSI CALCULATION ===
+rsi_val = custom_rsi(close, bestLen)
+smoothingLen = math.max(14, math.floor(bestLen / 5))
+rsi_smoothed = custom_sma(rsi_val, smoothingLen)
+
+// === DIVERGENCE DETECTION ===
+divLookback = math.max(30, math.floor(bestLen / 2))
+priceRank = percentile_rank(close, divLookback)
+rsiRank   = percentile_rank(rsi_smoothed, divLookback)
+divRaw    = rsiRank - priceRank
+divScore  = math.max(-1, math.min(1, divRaw * 2))
+smoothDivScore = custom_sma(divScore, smoothingLen)
+
+// === LINEAR NORMALIZATION TO [-1, 1] ===
+rsi_norm = (rsi_smoothed - 50) / 50  // RSI from [0,100] → [-1,1]
+
+// === FINAL SIGNAL WITH DIVERGENCE & SHARPENING ===
+signalRaw   = rsi_norm * (1 - math.abs(divScore))
+signalSharp = amplify(signalRaw, 0.5)
+
+// === PLOTTING NORMALIZED SIGNAL ===
+neutralZone = custom_stdev(signalSharp, smoothingLen) * 0.25
+intensity = math.round(math.min(50, math.abs(signalSharp - smoothDivScore) * 100))
+alpha = 100 - intensity  // final alpha ranges from 50 (opaque) to 100 (transparent)
+plotAlpha = math.max(0, alpha - 30)  // cap minimum to 0 to avoid errors
+
+hline(0, "Neutral", color=color.gray)
+
+plot(signalSharp, title="Normalized RSI [-1, 1]", linewidth=2, style = plot.style_histogram,
+     color=signalSharp > 0 ? color.new(color.aqua, plotAlpha) :
+           signalSharp < 0 ? color.new(color.fuchsia, plotAlpha) :
+           color.new(color.gray, plotAlpha))
+
+bgcolor(
+     signalSharp > smoothDivScore + neutralZone ? color.new(color.aqua, alpha) :
+     signalSharp < smoothDivScore - neutralZone ? color.new(color.fuchsia, alpha) :
+     na
+     )

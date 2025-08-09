@@ -1,0 +1,110 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=6
+indicator("(FVC) Fractal Volatility Compression (DAFE)", overlay=false, max_bars_back=500)
+
+// === USER INPUTS ===
+centerLine         = input.float(0.0, "Yellow Center Line (Zero)", step=0.01)
+compressionThresh  = input.float(-1.5, "Green Compression Threshold", step=0.01)
+expansionThresh    = input.float(1.5, "Red Expansion Threshold", step=0.01)
+lenShort = input.int(20, "Short TF Length")
+lenMed   = input.int(20, "Medium TF Length")
+lenLong  = input.int(20, "Long TF Length")
+lenHist  = input.int(120, "Z-Score Lookback")
+tfShort  = input.timeframe("5", "Short Timeframe")
+tfMed    = input.timeframe("15", "Medium Timeframe")
+tfLong   = input.timeframe("60", "Long Timeframe")
+showStdevFVC = input.bool(true, "Show Stdev FVC Line")
+showVoVixFVC = input.bool(true, "Show VoVix FVC Line")
+showDashboard = input.bool(true, "Show Dashboard")
+showInfoLabel = input.bool(true, "Show Compact Info Label")
+
+// === STDEV CALCULATION ON MULTIPLE TIMEFRAMES ===
+get_stdev(_len) =>
+    ta.stdev(close, _len)
+
+stdev_short = request.security(syminfo.tickerid, tfShort, get_stdev(lenShort))
+stdev_med   = request.security(syminfo.tickerid, tfMed,   get_stdev(lenMed))
+stdev_long  = request.security(syminfo.tickerid, tfLong,  get_stdev(lenLong))
+
+// === VOVIX CALCULATION ON MULTIPLE TIMEFRAMES ===
+get_vovix(_fast, _slow, _stdev) =>
+    (ta.atr(_fast) - ta.atr(_slow)) / (ta.stdev(ta.atr(_fast), _stdev) + 1e-6)
+
+vovix_short = request.security(syminfo.tickerid, tfShort, get_vovix(5, 34, 21))
+vovix_med   = request.security(syminfo.tickerid, tfMed,   get_vovix(5, 34, 21))
+vovix_long  = request.security(syminfo.tickerid, tfLong,  get_vovix(5, 34, 21))
+
+// === Z-SCORE NORMALIZATION FOR EACH TF ===
+zscore(_val, _len) =>
+    _sma = ta.sma(_val, _len)
+    _stdev = ta.stdev(_val, _len)
+    _stdev != 0 ? (_val - _sma) / _stdev : 0
+
+// --- Stdev Z-scores
+z_short_stdev = zscore(stdev_short, lenHist)
+z_med_stdev   = zscore(stdev_med,   lenHist)
+z_long_stdev  = zscore(stdev_long,  lenHist)
+
+// --- VoVix Z-scores
+z_short_vovix = zscore(vovix_short, lenHist)
+z_med_vovix   = zscore(vovix_med,   lenHist)
+z_long_vovix  = zscore(vovix_long,  lenHist)
+
+// === FRACTAL VOLATILITY COMPRESSION SCORES ===
+fvc_stdev = (z_short_stdev + z_med_stdev + z_long_stdev) / 3
+fvc_vovix = (z_short_vovix + z_med_vovix + z_long_vovix) / 3
+
+// === COMPOSITE Z-SCORE (VoVix FVC + Stdev FVC) ===
+composite_z = (fvc_vovix + fvc_stdev) / 2
+
+// === COLOR LOGIC ===
+compressedColor = color.new(color.green, 0)
+redColor = color.new(color.red, 0)
+orangeColor = color.new(color.orange, 0)
+purpleColor = color.new(color.purple, 0)
+yellowColor = color.new(color.yellow, 0)
+
+color_fvc_stdev = fvc_stdev > expansionThresh ? redColor : fvc_stdev < compressionThresh ? compressedColor : orangeColor
+color_fvc_vovix = fvc_vovix > expansionThresh ? redColor : fvc_vovix < compressionThresh ? compressedColor : purpleColor
+color_composite = composite_z > expansionThresh ? redColor : composite_z < compressionThresh ? compressedColor : orangeColor
+
+// === PLOT LINES ===
+plot(showStdevFVC ? fvc_stdev : na, color=color_fvc_stdev, linewidth=2, title="FVC (Stdev)", style=plot.style_line)
+plot(showVoVixFVC ? fvc_vovix : na, color=color_fvc_vovix, linewidth=2, title="FVC (VoVix)", style=plot.style_line)
+plot(centerLine, color=color.new(#e1ff00, 80), linewidth=1, style=plot.style_line, title="Zero Line")
+plot(expansionThresh, color=color.new(#ff0000, 75), linewidth=1, style=plot.style_line, title="Deviation High")
+plot(compressionThresh, color=color.new(#2fff00, 75), linewidth=1, style=plot.style_line, title="Deviation Low")
+
+// === FILL BETWEEN LINES WHEN IN AGREEMENT ===
+agreement_above = showStdevFVC and showVoVixFVC and (fvc_stdev > centerLine) and (fvc_vovix > centerLine)
+agreement_below = showStdevFVC and showVoVixFVC and (fvc_stdev < centerLine) and (fvc_vovix < centerLine)
+fill_id_above = plot(agreement_above ? fvc_stdev : na, color=color.new(color.red, 95), linewidth=2, title="Agreement Above Fill")
+fill_id_below = plot(agreement_below ? fvc_stdev : na, color=color.new(color.green, 95), linewidth=2, title="Agreement Below Fill")
+fill(plot(showVoVixFVC and agreement_above ? fvc_vovix : na, na, na, na), fill_id_above, color=color.new(color.red, 92))
+fill(plot(showVoVixFVC and agreement_below ? fvc_vovix : na, na, na, na), fill_id_below, color=color.new(color.green, 92))
+
+// === DASHBOARD  ===
+if showDashboard
+    var table dash = na
+    if na(dash)
+        dash := table.new(position.middle_right, 1, 9, bgcolor=color.new(color.black, 90), border_color=color.new(color.orange, 80), border_width=1)
+    table.clear(dash, 0, 0)
+    table.cell(dash, 0, 0, "🌀 Fractal Volatility Compression", text_color=color.orange, text_size=size.small, bgcolor=color.new(color.black, 0))
+    table.cell(dash, 0, 1, "VoVix FVC: " + str.tostring(fvc_vovix, "#.##"), text_color=color_fvc_vovix, text_size=size.small)
+    table.cell(dash, 0, 2, "Stdev FVC: " + str.tostring(fvc_stdev, "#.##"), text_color=color_fvc_stdev, text_size=size.small)
+    table.cell(dash, 0, 3, "Composite Z: " + str.tostring(composite_z, "#.##"), text_color=color.new(color.yellow, 0), text_size=size.small)
+   
+
+// === MOBILE/COMPACT INFO LABEL  ===
+
+if showInfoLabel
+    labelText = "VoVix FVC: " + str.tostring(fvc_vovix, "#.##") + " | Stdev FVC: " + str.tostring(fvc_stdev, "#.##") + " | Composite Z: " + str.tostring(composite_z, "#.##")
+    var label mobLabel = na
+    if na(mobLabel)
+        mobLabel := label.new(bar_index, na, labelText, xloc.bar_index, yloc.price, color.new(color.black, 80), label.style_label_left, color.white, size.small)
+    label.set_xy(mobLabel, bar_index, na)
+    label.set_text(mobLabel, labelText)
+    label.set_textcolor(mobLabel, color_composite)
+    label.set_style(mobLabel, label.style_label_left)

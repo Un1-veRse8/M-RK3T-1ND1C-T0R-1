@@ -1,0 +1,212 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © RWCS_LTD
+
+//@version=6
+indicator("Adaptive Signal Oscillator (ASO)", overlay=false, max_bars_back=500)
+
+// === USER SETTINGS ===
+smooth     = input.bool(true, "Apply Dynamic Smoothing?")
+show       = input.string("Combined", "Plot Type", options = ["Combined", "Seperate"], tooltip = "Plot ASO and Divergence Scale seperatly or combined?")
+
+minLen     = input.int(10,  "Minimum Lookback",           minval=1, maxval=100)
+maxLen     = input.int(200, "Maximum Lookback",           minval=1, maxval=500)
+step       = input.int(5,  "Optimization Step",          minval=1,  maxval=50)
+
+retMethod  = input.string("pct", "Return Type", options=["log", "pct"])
+
+threshHigh = input.float(0.8, "Strong Signal Threshold",  minval=0.5, maxval=1.0)
+threshLow  = input.float(0.2, "Weak Signal Threshold",    minval=0.0, maxval=0.5)
+h_thresh   = input.float(0.0, "Crossover Threshold",      minval=-1,  maxval=1, tooltip = "Histogram range is -1 to 1. This is the crossover level for long/short zones.")
+
+// === RETURN CALCULATION ===
+ret = retMethod == "log" ? math.log(close / close[1]) : (close / close[1]) - 1
+
+// === SAFE CUSTOM SMA ===
+custom_sma(src, len) =>
+    float result = na
+    if bar_index >= len and len >= 1
+        sum = 0.0
+        for i = 0 to len - 1
+            sum := sum + src[i]
+        result := sum / len
+    result
+
+// === SAFE CUSTOM STDEV ===
+custom_stdev(src, len) =>
+    float result = na
+    if bar_index >= len and len >= 2
+        mean = custom_sma(src, len)
+        sumSq = 0.0
+        for i = 0 to len - 1
+            sumSq := sumSq + math.pow(src[i] - mean, 2)
+        result := math.sqrt(sumSq / len)
+    result
+
+// === SAFE CUSTOM RSI ===
+custom_rsi(src, len) =>
+    float result = na
+    if bar_index >= len and len >= 2
+        gain = 0.0
+        loss = 0.0
+        for i = 1 to len
+            change = src[i - 1] - src[i]
+            gain := gain + (change > 0 ? change : 0)
+            loss := loss + (change < 0 ? -change : 0)
+        rs = loss == 0 ? 100 : gain / loss
+        result := 100 - (100 / (1 + rs))
+    result
+
+// === PERCENTILE RANK FUNCTION ===
+percentile_rank(src, len) =>
+    count = 0.0
+    for i = 0 to len - 1
+        count := count + (src[i] < src[0] ? 1 : 0)
+    count / len
+
+// === DYNAMIC LOOKBACK OPTIMIZATION ===
+int bestLen = minLen  // Not 'var' — allow dynamic updates per bar
+
+if bar_index >= (maxLen + step)
+    float bestStability = 999.0
+    for len = minLen to maxLen by step
+        stdNow = custom_stdev(ret, len)
+        stdPrev = custom_stdev(ret, len - step)
+        if not na(stdNow) and not na(stdPrev)
+            diff = math.abs(stdNow - stdPrev)
+            if diff < bestStability
+                bestStability := diff
+                bestLen := len
+
+// === SIGNAL LAYERS ===
+rsi_val    = custom_rsi(close, bestLen)
+price_mean = custom_sma(close, bestLen)
+price_std  = custom_stdev(close, bestLen)
+z          = price_std != 0 ? (close - price_mean) / price_std : 0
+ret_std    = custom_stdev(ret, bestLen)
+
+// === NORMALIZED SCORES ===
+rsi_score  = percentile_rank(rsi_val, bestLen) * 2 - 1
+z_score    = percentile_rank(z, bestLen) * 2 - 1
+vol_score  = percentile_rank(ret_std, bestLen) * 2 - 1
+price_pos  = percentile_rank(close, bestLen) * 2 - 1
+
+// === VOLATILITY-BASED WEIGHTING ===
+rsi_vol = custom_stdev(rsi_score, bestLen)
+z_vol   = custom_stdev(z_score, bestLen)
+vol_vol = custom_stdev(vol_score, bestLen)
+pos_vol = custom_stdev(price_pos, bestLen)
+
+vol_sum = (rsi_vol + z_vol + vol_vol + pos_vol)
+vol_sum := vol_sum == 0 ? 1e-10 : vol_sum  // avoid div-by-zero
+
+w_rsi = (1 - rsi_vol / vol_sum)
+w_z   = (1 - z_vol   / vol_sum)
+w_vol = (1 - vol_vol / vol_sum)
+w_pos = (1 - pos_vol / vol_sum)
+
+w_total = w_rsi + w_z + w_vol + w_pos
+w_rsi := w_rsi / w_total
+w_z   := w_z   / w_total
+w_vol := w_vol / w_total
+w_pos := w_pos / w_total
+
+// === COMPOSITE SCORE ===
+float score = na
+score := not na(rsi_score) and not na(z_score) and not na(vol_score) and not na(price_pos) ?
+         (rsi_score * w_rsi) + 
+         (z_score   * w_z) + 
+         (vol_score * w_vol) + 
+         (price_pos * w_pos) : na
+
+norm_score = percentile_rank(score, bestLen)
+
+score_rank = not na(score) ? norm_score : na
+
+// === OPTIONAL SMOOTHING ===
+smoothingLen = math.max(2, math.floor(bestLen / 5))
+smoothedScore = custom_sma(score, smoothingLen)
+finalScore = smooth and not na(smoothedScore) ? smoothedScore : score
+
+// === ASO SIGNALS ===
+longSignal  = score_rank > threshHigh
+shortSignal = score_rank < threshLow
+neutral     = not longSignal and not shortSignal
+
+// === CONTINUOUS NORMALIZED DIVERGENCE ===
+divLookback = math.max(50, math.floor(bestLen / 2))
+
+// Percentile rank of price and score
+priceRank = percentile_rank(close, divLookback)
+scoreRank = percentile_rank(finalScore, divLookback)
+
+// Divergence = difference in behavior between price and signal
+divRaw = scoreRank - priceRank
+
+// Normalize to [-1, 1]
+divScore = math.max(-1, math.min(1, divRaw * 2))
+
+// === SIGNAL CLASSIFICATION ===
+long     = finalScore > 0 and divScore < 0
+short    = finalScore < 0 and divScore < 0
+neutral_ = not long and not short  // ensures exclusivity
+
+// === PLOTTING ===
+amplify(x, power) =>
+    sign = x > 0 ? 1 : x < 0 ? -1 : 0
+    sign * math.pow(math.abs(x), power)
+
+signalRaw = finalScore * (1 - math.abs(divScore))
+
+power = 0.5  // √x-style sensitivity boost
+signalSharp = amplify(signalRaw, power)
+
+plotCond = signalSharp
+
+gradientColor =
+     signalSharp > 0 ? color.new(color.aqua, math.round(100 - (signalSharp * 100))) :
+     signalSharp < 0 ? color.new(color.fuchsia, math.round(100 + (signalSharp * 100))) :
+     color.new(color.gray, 90)
+
+plot(show == "Combined" ? plotCond : na, title="ASO Gradient Signal", color=gradientColor, linewidth=2)
+
+plot(show == "Seperate" ? finalScore : na, title="Composite Score", linewidth=2, color=finalScore > h_thresh ? color.aqua : color.fuchsia)
+plot(show == "Seperate" ? divScore : na, title="Divergence Score", linewidth=1, color=color.orange)
+
+hline(0, "Neutral", color=color.gray)
+
+bgcolor(longSignal ? color.new(color.aqua, 85) : na)
+bgcolor(shortSignal ? color.new(color.fuchsia, 85) : na)
+bgcolor(neutral ? color.new(color.gray, 95) : na)
+
+// === TABLE DISPLAY ===
+f_pos(string position) =>
+    pos = switch position
+        "Top Left" => position.top_left
+        "Middle Left" => position.middle_left
+        "Bottom Left" => position.bottom_left
+        "Top Right" => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Center" => position.top_center
+        "Bottom Center" => position.bottom_center
+        "Center" => position.middle_center
+    pos
+
+pos_table2 = input.string(defval = "Bottom Right", options = ["Top Left", "Middle Left", "Bottom Left", "Top Right", "Middle Right", "Bottom Right", "Top Center", "Center", "Bottom Center"], title = "Position", group="Table Settings", inline = "2")
+size = input.string(defval='Normal', options=['Tiny', 'Small', 'Normal', 'Large'], title='Size', group="Table Settings", inline = "2")
+table_size = size == 'Tiny' ? size.tiny : size == 'Small' ? size.small : size == 'Normal' ? size.normal : size == 'Large' ? size.large : na
+
+var table sigTable = table.new(f_pos(pos_table2), 2, 2, border_width=1, force_overlay = true)
+
+bgColor = longSignal ? color.new(color.aqua, 80) :
+          shortSignal ? color.new(color.fuchsia, 80) :
+          color.new(color.gray, 90)
+
+textColor = color.new(color.white, 80)
+
+table.cell(sigTable, 0, 0, "Len:", bgcolor=color.new(color.white, 100), text_color=textColor, text_halign=text.align_left, text_size = table_size)
+table.cell(sigTable, 1, 0, str.tostring(bestLen), bgcolor=color.new(color.white, 100), text_color=textColor, text_size = table_size)
+
+signalText = longSignal ? "Strong Long" : shortSignal ? "Strong Short" : "Neutral"
+table.cell(sigTable, 0, 1, "Signal:", bgcolor=color.new(color.white, 100), text_color=textColor, text_halign=text.align_left, text_size = table_size)
+table.cell(sigTable, 1, 1, signalText, bgcolor=bgColor, text_color=textColor, text_size = table_size)

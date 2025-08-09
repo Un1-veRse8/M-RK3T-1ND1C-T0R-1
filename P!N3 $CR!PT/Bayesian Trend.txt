@@ -1,0 +1,231 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © ChartPrime
+
+//@version=5
+indicator("Bayesian Trend", overlay=true)
+
+rsiLength = input.int(14,  "RSI Length", group="Base Settings") 
+emaLength = input.int(50,  "EMA Length", group="Base Settings")
+atrLength = input.int(14,  "ATR Length", group="Base Settings")
+volSmaLen = input.int(50,  "Volume SMA Length", group="Base Settings")
+rsiLowThresh  = input.float(30.0, "RSI Low Threshold",  group="Binning Settings - RSI")
+rsiHighThresh = input.float(70.0, "RSI High Threshold", group="Binning Settings - RSI")
+macdNegBound  = input.float(-0.1, "MACD Negative Boundary", group="Binning Settings - MACD")
+macdPosBound  = input.float(0.1,  "MACD Positive Boundary", group="Binning Settings - MACD")
+emaBoundaryFactor = input.float(0.5, "EMA Diff Factor (in ATR units)", group="Binning Settings - EMA")
+atrFactor = input.float(1.0, "ATR factor vs. average", group="Binning Settings - ATR")
+volLowFactor  = input.float(0.8, "Volume Low Factor (vs SMA)", group="Binning Settings - Volume")
+volHighFactor = input.float(1.2, "Volume High Factor (vs SMA)", group="Binning Settings - Volume")
+rsiVal = ta.rsi(close, rsiLength)
+emaVal = ta.ema(close, emaLength)
+macdLine   = ta.ema(close, 12) - ta.ema(close, 26)
+macdSignal = ta.ema(macdLine, 9)
+macdHist   = macdLine - macdSignal
+atrVal     = ta.atr(atrLength)
+volSma     = ta.sma(volume, volSmaLen)
+
+f_rsi_zone(rsi) =>
+    if rsi < rsiLowThresh
+        0
+    else if rsi > rsiHighThresh
+        2
+    else
+        1
+
+f_macd_zone(mhist) =>
+    if mhist < macdNegBound
+        0
+    else if mhist > macdPosBound
+        2
+    else
+        1
+
+f_ema_diff_zone(price, ema, atrVal) =>
+    boundary = emaBoundaryFactor * atrVal
+    diff = price - ema
+    if diff < -boundary
+        0
+    else if diff > boundary
+        2
+    else
+        1
+
+f_atr_zone(atrVal) =>
+    avgATR = ta.sma(atrVal, 50)
+    threshold = avgATR * atrFactor
+    if atrVal < threshold
+        0
+    else
+        1
+
+f_vol_zone(vol, volSmaVal) =>
+    if volSmaVal == 0
+        1 // fallback
+    else
+        float ratio = vol / volSmaVal
+        if ratio < volLowFactor
+            0
+        else if ratio > volHighFactor
+            2
+        else
+            1
+
+rsiZone     = f_rsi_zone(rsiVal)
+macdZone    = f_macd_zone(macdHist)
+emaDiffZone = f_ema_diff_zone(close, emaVal, atrVal)
+atrZone     = f_atr_zone(atrVal)
+volZone     = f_vol_zone(volume, volSma)
+
+var rsiUpProbs      = array.new_float(3)
+var rsiDownProbs    = array.new_float(3)
+var rsiNeutralProbs = array.new_float(3)
+if barstate.isfirst
+    array.set(rsiUpProbs,      0, 0.50)
+    array.set(rsiDownProbs,    0, 0.20)
+    array.set(rsiNeutralProbs, 0, 0.30)
+    array.set(rsiUpProbs,      1, 0.33)
+    array.set(rsiDownProbs,    1, 0.33)
+    array.set(rsiNeutralProbs, 1, 0.34)
+    array.set(rsiUpProbs,      2, 0.20)
+    array.set(rsiDownProbs,    2, 0.60)
+    array.set(rsiNeutralProbs, 2, 0.20)
+
+var macdUpProbs      = array.new_float(3)
+var macdDownProbs    = array.new_float(3)
+var macdNeutralProbs = array.new_float(3)
+if barstate.isfirst
+    array.set(macdUpProbs,      0, 0.10)
+    array.set(macdDownProbs,    0, 0.70)
+    array.set(macdNeutralProbs, 0, 0.20)
+    array.set(macdUpProbs,      1, 0.30)
+    array.set(macdDownProbs,    1, 0.30)
+    array.set(macdNeutralProbs, 1, 0.40)
+    array.set(macdUpProbs,      2, 0.65)
+    array.set(macdDownProbs,    2, 0.15)
+    array.set(macdNeutralProbs, 2, 0.20)
+
+var emaUpProbs      = array.new_float(3)
+var emaDownProbs    = array.new_float(3)
+var emaNeutralProbs = array.new_float(3)
+if barstate.isfirst
+    array.set(emaUpProbs,      0, 0.15)
+    array.set(emaDownProbs,    0, 0.60)
+    array.set(emaNeutralProbs, 0, 0.25)
+    array.set(emaUpProbs,      1, 0.33)
+    array.set(emaDownProbs,    1, 0.33)
+    array.set(emaNeutralProbs, 1, 0.34)
+    array.set(emaUpProbs,      2, 0.65)
+    array.set(emaDownProbs,    2, 0.15)
+    array.set(emaNeutralProbs, 2, 0.20)
+
+var atrUpProbs      = array.new_float(2)
+var atrDownProbs    = array.new_float(2)
+var atrNeutralProbs = array.new_float(2)
+if barstate.isfirst
+    array.set(atrUpProbs,      0, 0.40)
+    array.set(atrDownProbs,    0, 0.30)
+    array.set(atrNeutralProbs, 0, 0.30)
+    array.set(atrUpProbs,      1, 0.30)
+    array.set(atrDownProbs,    1, 0.40)
+    array.set(atrNeutralProbs, 1, 0.30)
+
+var volUpProbs      = array.new_float(3)
+var volDownProbs    = array.new_float(3)
+var volNeutralProbs = array.new_float(3)
+if barstate.isfirst
+    array.set(volUpProbs,      0, 0.33)
+    array.set(volDownProbs,    0, 0.33)
+    array.set(volNeutralProbs, 0, 0.34)
+    array.set(volUpProbs,      1, 0.33)
+    array.set(volDownProbs,    1, 0.33)
+    array.set(volNeutralProbs, 1, 0.34)
+    array.set(volUpProbs,      2, 0.40) 
+    array.set(volDownProbs,    2, 0.40)
+    array.set(volNeutralProbs, 2, 0.20)
+
+P_up0      = 0.33
+P_down0    = 0.33
+P_neutral0 = 0.34
+
+rsiUpProb      = array.get(rsiUpProbs,      rsiZone)
+macdUpProb     = array.get(macdUpProbs,     macdZone)
+emaUpProb      = array.get(emaUpProbs,      emaDiffZone)
+atrUpProb      = array.get(atrUpProbs,      atrZone)
+volUpProb      = array.get(volUpProbs,      volZone)
+likelyUp = P_up0 * rsiUpProb * macdUpProb * emaUpProb * atrUpProb * volUpProb
+
+rsiDownProb      = array.get(rsiDownProbs,      rsiZone)
+macdDownProb     = array.get(macdDownProbs,     macdZone)
+emaDownProb      = array.get(emaDownProbs,      emaDiffZone)
+atrDownProb      = array.get(atrDownProbs,      atrZone)
+volDownProb      = array.get(volDownProbs,      volZone)
+likelyDown = P_down0 * rsiDownProb * macdDownProb * emaDownProb * atrDownProb * volDownProb
+
+rsiNeutralProb      = array.get(rsiNeutralProbs,      rsiZone)
+macdNeutralProb     = array.get(macdNeutralProbs,     macdZone)
+emaNeutralProb      = array.get(emaNeutralProbs,      emaDiffZone)
+atrNeutralProb      = array.get(atrNeutralProbs,      atrZone)
+volNeutralProb      = array.get(volNeutralProbs,      volZone)
+likelyNeutral = P_neutral0 * rsiNeutralProb * macdNeutralProb * emaNeutralProb * atrNeutralProb * volNeutralProb
+
+sumAll = likelyUp + likelyDown + likelyNeutral
+P_up_final      = sumAll == 0.0 ? 0.0 : (likelyUp      / sumAll)
+P_down_final    = sumAll == 0.0 ? 0.0 : (likelyDown    / sumAll)
+P_neutral_final = sumAll == 0.0 ? 0.0 : (likelyNeutral / sumAll)
+
+barColor = if P_up_final > 0.5
+    color.new(color.green, 0)
+else if P_down_final > 0.5
+    color.new(color.red, 0)
+else
+    color.blue
+
+barcolor(barColor)
+
+var table t = table.new(position.top_right, 1, 5, border_width=1, bgcolor=na)
+if barstate.islast
+    table.cell(t, 0, 0, "")
+    table.cell(t, 0, 1, "What's next?", text_color=color.rgb(255, 255, 255), bgcolor=color.rgb(2, 123, 0, 33), text_halign=text.align_left)
+    table.cell(t, 0, 2, "🟢" + str.tostring(P_up_final * 100, format.percent), text_color=color.green, text_halign=text.align_left)
+    table.cell(t, 0, 3, "🔴" + str.tostring(P_down_final * 100, format.percent), text_color=color.red, text_halign=text.align_left)
+    table.cell(t, 0, 4, "🔵" + str.tostring(P_neutral_final * 100, format.percent), text_color=color.blue, text_halign=text.align_left)
+groupAlerts = "Alert Settings"
+
+upCondition = input.string(">",   title="UP Condition",   options=["<", ">", "="], group=groupAlerts)
+upValue     = input.float(50.0,   "UP Alert %",           group=groupAlerts)
+
+downCondition = input.string(">", title="DOWN Condition", options=["<", ">", "="], group=groupAlerts)
+downValue     = input.float(50.0, "DOWN Alert %",         group=groupAlerts)
+
+alertOnClose  = input.bool(false, "Alert on bar close only", group=groupAlerts)
+
+volZoneInput  = input.int(2, "Volume zone alert", minval=0, maxval=2, group=groupAlerts)
+
+f_check(prob, cond, valPcnt) =>
+    _threshold = valPcnt / 100.0
+    if cond == "<"
+        prob < _threshold
+    else if cond == ">"
+        prob > _threshold
+    else
+        // '='
+        prob == _threshold
+
+
+bool upAlertTrig   = false
+bool downAlertTrig = false
+bool volZoneTrig   = false
+
+if alertOnClose
+    if barstate.isconfirmed
+        upAlertTrig   := f_check(P_up_final,   upCondition,   upValue)
+        downAlertTrig := f_check(P_down_final, downCondition, downValue)
+        volZoneTrig   := (volZone == volZoneInput)
+else
+    upAlertTrig   := f_check(P_up_final,   upCondition,   upValue)
+    downAlertTrig := f_check(P_down_final, downCondition, downValue)
+    volZoneTrig   := (volZone == volZoneInput)
+
+alertcondition(upAlertTrig,   "Up Alert",       "NaiveBayesVolume: UP probability triggered!")
+alertcondition(downAlertTrig, "Down Alert",     "NaiveBayesVolume: DOWN probability triggered!")
+alertcondition(volZoneTrig,   "VolumeZone Alert","NaiveBayesVolume: volume zone matched user zone!")

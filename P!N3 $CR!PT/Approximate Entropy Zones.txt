@@ -1,0 +1,145 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/  
+// © PhenLabs 
+
+//@version=6
+indicator('Approximate Entropy Zones [PhenLabs]', shorttitle = 'PhenLabs - ApEn', overlay = true, max_boxes_count = 500)
+
+// ========================
+// Entropy Analysis
+// ========================
+var entropyGroup = 'Entropy Analysis'
+apen_source = input.source(close, 'Source', group = entropyGroup, tooltip = 'Specifies the price data (e.g., close, ohlc4) used to calculate market complexity. The choice of source can slightly alter the resulting entropy values.')
+apen_length = input.int(20, 'Lookback Length', minval = 10, maxval = 50, group = entropyGroup, tooltip = 'The number of historical bars included in the Approximate Entropy (ApEn) calculation. Longer lengths analyze complexity over a greater period but are more resource-intensive. WARNING: Values above 40 may significantly slow down the script.')
+apen_m = input.int(2, 'Embedding Dimension (m)', group = entropyGroup, tooltip = 'Defines the length of consecutive data points (patterns) to be compared. A value of 2 is standard and effective for most financial time series analysis.')
+apen_r_mult = input.float(0.2, 'Tolerance Multiplier (r)', step = 0.1, group = entropyGroup, tooltip = 'Sets the tolerance for pattern matching. This value is multiplied by the standard deviation of the source data. A larger multiplier makes the matching criteria more lenient, potentially resulting in lower entropy values.')
+apen_threshold = input.float(0.525, 'Entropy Threshold', step = 0.1, group = entropyGroup, tooltip = 'The specific ApEn value that must be exceeded for a zone to be plotted. This is the primary control for adjusting the frequency of zones. Increase this value if too many zones appear; decrease it if too few appear.')
+
+// ==================
+// Time Configuration
+// ==================
+var timeGroup = 'Time Settings'
+timeframeOption = input.string('1D', 'Analysis Timeframe', options = ['15M', '1HR', '3HR', '4HR', '8HR', '16HR', '1D', '3D', '5D', '1W', 'Custom'], tooltip = 'Determines how long a zone will remain on the chart after it forms. For example, selecting "1D" means zones will expire and be removed one day after they appear.', group = timeGroup)
+customBars = input.int(1000, 'Custom Period (Bars)', minval = 1, tooltip = 'If "Analysis Timeframe" is set to "Custom", this value specifies the zone\'s lifespan in number of bars.', group = timeGroup)
+
+// ===============
+// Zone Appearance
+// ===============
+var zoneGroup = 'Zone Settings'
+zoneColor = input.color(color.new(#21f38a, 80), 'Zone Fill Color', tooltip = 'Sets the display color and transparency for the plotted entropy zones.', group = zoneGroup)
+maxZoneSize = input.float(0.5, 'Maximum Zone Size %', minval = 0.1, step = 0.1, tooltip = 'Acts as a filter to exclude zones formed on excessively large candles. The value is the maximum allowed candle height as a percentage of its low price. For example, 0.5% filters out zones on candles that moved more than 0.5%.', group = zoneGroup)
+
+// =================
+// Display Settings
+// =================
+var displayGroup = 'Display Options'
+showEntropy = input.bool(true, 'Show Entropy Label', tooltip = 'Toggles the visibility of the text label inside each zone, which displays the calculated entropy value and the candle\'s direction.', group = displayGroup)
+textAlign = input.string('Right', 'Label Text Position', options = ['Left', 'Center', 'Right'], tooltip = 'Controls the horizontal alignment (left, center, or right) of the text label within the zone.', group = displayGroup)
+showNote = input.bool(true, 'Show Calibration Note', tooltip = 'Displays a persistent note in the top-right corner of the chart with instructions on how to calibrate the "Entropy Threshold" setting for optimal results.', group = displayGroup)
+
+// Get current chart timeframe in minutes
+chartTimeframe = timeframe.multiplier * (timeframe.isseconds ? 1.0 / 60.0 : timeframe.isminutes ? 1.0 : timeframe.isdaily ? 1440.0 : timeframe.isweekly ? 10080.0 : timeframe.ismonthly ? 43200.0 : 1.0)
+
+// Convert timeframe selection to bars
+lookbackBars = switch timeframeOption
+    '15M' => math.round(15 / chartTimeframe)
+    '1HR' => math.round(60 / chartTimeframe)
+    '3HR' => math.round(180 / chartTimeframe)
+    '4HR' => math.round(240 / chartTimeframe)
+    '8HR' => math.round(480 / chartTimeframe)
+    '16HR' => math.round(960 / chartTimeframe)
+    '1D' => math.round(1440 / chartTimeframe)
+    '3D' => math.round(4320 / chartTimeframe)
+    '5D' => math.round(7200 / chartTimeframe)
+    '1W' => math.round(10080 / chartTimeframe)
+    'Custom' => customBars
+
+// Helper function to calculate Phi for ApEn
+f_phi(source, len, m_val, tolerance) =>
+    num_vectors = len - m_val + 1
+    if num_vectors <= 0
+        na
+    else
+        log_sum = 0.0
+        for i = 0 to num_vectors - 1 by 1
+            similar_matches = 0
+            for j = 0 to num_vectors - 1 by 1
+                is_similar = true
+                for k = 0 to m_val - 1 by 1
+                    if math.abs(source[i + k] - source[j + k]) > tolerance
+                        is_similar := false
+                        break
+                if is_similar
+                    similar_matches := similar_matches + 1
+                    similar_matches
+            if similar_matches > 0
+                log_sum := log_sum + math.log(similar_matches / num_vectors)
+                log_sum
+        log_sum / num_vectors
+
+// Function to calculate Approximate Entropy (ApEn)
+f_apen(src, length, m, r_mult) =>
+    r = ta.stdev(src, length) * r_mult
+    if na(r) or r <= 0
+        na
+    else
+        phi_m = f_phi(src, length, m, r)
+        phi_m1 = f_phi(src, length, m + 1, r)
+        phi_m - phi_m1
+
+// Calculate ApEn value
+apenValue = f_apen(apen_source, apen_length, apen_m, apen_r_mult)
+isHighEntropy = not na(apenValue) and apenValue > apen_threshold
+
+// Convert text alignment input
+getTextAlignment() =>
+    switch textAlign
+        'Left' => text.align_left
+        'Right' => text.align_right
+        => text.align_center
+
+// Structure for zone management
+type ZoneBox
+	box box
+	float entropyValue
+	int startBar
+
+var zoneBoxes = array.new<ZoneBox>()
+
+// Calculate zone size as a percentage
+getZoneSize() =>
+    (high - low) / low * 100
+
+// Remove expired zones
+if array.size(zoneBoxes) > 0
+    for i = array.size(zoneBoxes) - 1 to 0 by 1
+        if bar_index - array.get(zoneBoxes, i).startBar > lookbackBars
+            box.delete(array.get(zoneBoxes, i).box)
+            array.remove(zoneBoxes, i)
+
+// Create new zones on high entropy if zone size is within limit
+if isHighEntropy and getZoneSize() <= maxZoneSize
+    // Determine direction for arrow
+    directionArrow = close > open ? ' ↑' : close < open ? ' ↓' : ' →'
+    // Format the label text
+    entropyText = str.tostring(apenValue, '0.###')
+    labelText = showEntropy ? entropyText + directionArrow : ''
+
+    if array.size(zoneBoxes) >= 500
+        box.delete(array.get(zoneBoxes, 0).box)
+        array.shift(zoneBoxes)
+
+    newBox = box.new(left = bar_index, top = high, right = bar_index + 1, bottom = low, bgcolor = zoneColor, border_color = zoneColor, text = labelText, text_size = size.small, text_color = color.white, text_halign = getTextAlignment())
+    array.push(zoneBoxes, ZoneBox.new(newBox, apenValue, bar_index))
+
+// Update existing zones
+if array.size(zoneBoxes) > 0
+    for i = 0 to array.size(zoneBoxes) - 1 by 1
+        currentZone = array.get(zoneBoxes, i)
+        box.set_right(currentZone.box, bar_index + 1)
+
+// --- FIX WAS HERE --- Replaced label with a table for correct positioning ---
+var table noteTable = table.new(position.top_right, 1, 1, bgcolor = color.new(#1e222d, 20), border_width = 1, border_color = color.new(color.gray, 50))
+if barstate.islast and showNote
+    noteText = 'Zone Calibration:\n\n' + '• Too many zones?\n' + '  Increase "Entropy Threshold"\n\n' + '• Too few zones?\n' + '  Decrease "Entropy Threshold"'
+
+    table.cell(noteTable, 0, 0, noteText, text_color = color.gray, text_size = size.small)

@@ -1,0 +1,632 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/ 
+// © Julien_Eche
+
+//@version=6
+indicator(title = 'Best EMA Finder', overlay = true, max_bars_back = 1100)
+
+// Input
+strategy_type = input.string(defval = 'Long Only', title = 'Strategy Type', options = ['Buy & Sell', 'Long Only'])
+min_trades = input.int(defval = 100, title = 'Minimum Trades to Consider', minval = 1)
+show_table = input.bool(true, title = 'Show Stats Table')
+
+// Function to calculate robustness
+f_robustness(pf, trades, win_rate, min_trades) =>
+    trades >= min_trades and not na(pf) and pf >= 0 and not na(win_rate) ? pf * math.log(trades) * math.sqrt(win_rate) : -1e10
+
+// Backtest function
+backtest(ma_len) =>
+    xMA = ta.ema(close, ma_len)
+    var float entry_price_long = na
+    var float entry_price_short = na
+    var int total_trades = 0
+    var int winning_trades = 0
+    var float total_profit = 0.0
+    var float total_loss = 0.0
+    long_condition = ta.crossover(close, xMA)
+    short_condition = ta.crossunder(close, xMA)
+    float trade_profit = na
+
+    if strategy_type == 'Buy & Sell'
+        if long_condition and na(entry_price_long) and na(entry_price_short)
+            entry_price_long := close
+            total_trades := total_trades + 1
+            total_trades
+        else if short_condition and not na(entry_price_long)
+            trade_profit := close - entry_price_long
+            if trade_profit > 0
+                total_profit := total_profit + trade_profit
+                winning_trades := winning_trades + 1
+                winning_trades
+            else
+                total_loss := total_loss - trade_profit
+                total_loss
+            entry_price_long := na
+            entry_price_short := close
+            total_trades := total_trades + 1
+            total_trades
+        else if short_condition and na(entry_price_short) and na(entry_price_long)
+            entry_price_short := close
+            total_trades := total_trades + 1
+            total_trades
+        else if long_condition and not na(entry_price_short)
+            trade_profit := entry_price_short - close
+            if trade_profit > 0
+                total_profit := total_profit + trade_profit
+                winning_trades := winning_trades + 1
+                winning_trades
+            else
+                total_loss := total_loss - trade_profit
+                total_loss
+            entry_price_short := na
+            entry_price_long := close
+            total_trades := total_trades + 1
+            total_trades
+    else // Long Only
+        if long_condition and na(entry_price_long)
+            entry_price_long := close
+            total_trades := total_trades + 1
+            total_trades
+        else if short_condition and not na(entry_price_long)
+            trade_profit := close - entry_price_long
+            if trade_profit > 0
+                total_profit := total_profit + trade_profit
+                winning_trades := winning_trades + 1
+                winning_trades
+            else
+                total_loss := total_loss - trade_profit
+                total_loss
+            entry_price_long := na
+            entry_price_long
+
+    float profit_factor = total_loss > 0 ? total_profit / total_loss : total_profit > 0 ? 10000.0 : 0
+    float win_rate = total_trades > 0 ? winning_trades / total_trades : 0.0
+    float robustness = f_robustness(profit_factor, total_trades, win_rate, min_trades)
+
+    [total_trades, profit_factor, win_rate, robustness]
+
+// Backtest over different periods
+[tt10, pf10, wr10, r10] = backtest(10)
+[tt20, pf20, wr20, r20] = backtest(20)
+[tt30, pf30, wr30, r30] = backtest(30)
+[tt40, pf40, wr40, r40] = backtest(40)
+[tt50, pf50, wr50, r50] = backtest(50)
+[tt60, pf60, wr60, r60] = backtest(60)
+[tt70, pf70, wr70, r70] = backtest(70)
+[tt80, pf80, wr80, r80] = backtest(80)
+[tt90, pf90, wr90, r90] = backtest(90)
+[tt100, pf100, wr100, r100] = backtest(100)
+[tt110, pf110, wr110, r110] = backtest(110)
+[tt120, pf120, wr120, r120] = backtest(120)
+[tt130, pf130, wr130, r130] = backtest(130)
+[tt140, pf140, wr140, r140] = backtest(140)
+[tt150, pf150, wr150, r150] = backtest(150)
+[tt160, pf160, wr160, r160] = backtest(160)
+[tt170, pf170, wr170, r170] = backtest(170)
+[tt180, pf180, wr180, r180] = backtest(180)
+[tt190, pf190, wr190, r190] = backtest(190)
+[tt200, pf200, wr200, r200] = backtest(200)
+[tt210, pf210, wr210, r210] = backtest(210)
+[tt220, pf220, wr220, r220] = backtest(220)
+[tt230, pf230, wr230, r230] = backtest(230)
+[tt240, pf240, wr240, r240] = backtest(240)
+[tt250, pf250, wr250, r250] = backtest(250)
+[tt260, pf260, wr260, r260] = backtest(260)
+[tt270, pf270, wr270, r270] = backtest(270)
+[tt280, pf280, wr280, r280] = backtest(280)
+[tt290, pf290, wr290, r290] = backtest(290)
+[tt300, pf300, wr300, r300] = backtest(300)
+[tt310, pf310, wr310, r310] = backtest(310)
+[tt320, pf320, wr320, r320] = backtest(320)
+[tt330, pf330, wr330, r330] = backtest(330)
+[tt340, pf340, wr340, r340] = backtest(340)
+[tt350, pf350, wr350, r350] = backtest(350)
+[tt360, pf360, wr360, r360] = backtest(360)
+[tt370, pf370, wr370, r370] = backtest(370)
+[tt380, pf380, wr380, r380] = backtest(380)
+[tt390, pf390, wr390, r390] = backtest(390)
+[tt400, pf400, wr400, r400] = backtest(400)
+[tt410, pf410, wr410, r410] = backtest(410)
+[tt420, pf420, wr420, r420] = backtest(420)
+[tt430, pf430, wr430, r430] = backtest(430)
+[tt440, pf440, wr440, r440] = backtest(440)
+[tt450, pf450, wr450, r450] = backtest(450)
+[tt460, pf460, wr460, r460] = backtest(460)
+[tt470, pf470, wr470, r470] = backtest(470)
+[tt480, pf480, wr480, r480] = backtest(480)
+[tt490, pf490, wr490, r490] = backtest(490)
+[tt500, pf500, wr500, r500] = backtest(500)
+
+
+// Find the best
+var float best_score = -1e10
+var int best_len = na // Default to na, will be updated if a valid EMA is found
+var int best_trades = na
+var float best_pf = na
+var float best_wr = na
+var bool found_valid_len = false // Flag to track if any valid length was found
+
+
+if not na(r10) and r10 > best_score
+    best_score := r10
+    best_len := 10
+    best_trades := tt10
+    best_pf := pf10
+    best_wr := wr10
+    found_valid_len := true
+    found_valid_len
+if not na(r20) and r20 > best_score
+    best_score := r20
+    best_len := 20
+    best_trades := tt20
+    best_pf := pf20
+    best_wr := wr20
+    found_valid_len := true
+    found_valid_len
+if not na(r30) and r30 > best_score
+    best_score := r30
+    best_len := 30
+    best_trades := tt30
+    best_pf := pf30
+    best_wr := wr30
+    found_valid_len := true
+    found_valid_len
+if not na(r40) and r40 > best_score
+    best_score := r40
+    best_len := 40
+    best_trades := tt40
+    best_pf := pf40
+    best_wr := wr40
+    found_valid_len := true
+    found_valid_len
+if not na(r50) and r50 > best_score
+    best_score := r50
+    best_len := 50
+    best_trades := tt50
+    best_pf := pf50
+    best_wr := wr50
+    found_valid_len := true
+    found_valid_len
+if not na(r60) and r60 > best_score
+    best_score := r60
+    best_len := 60
+    best_trades := tt60
+    best_pf := pf60
+    best_wr := wr60
+    found_valid_len := true
+    found_valid_len
+if not na(r70) and r70 > best_score
+    best_score := r70
+    best_len := 70
+    best_trades := tt70
+    best_pf := pf70
+    best_wr := wr70
+    found_valid_len := true
+    found_valid_len
+if not na(r80) and r80 > best_score
+    best_score := r80
+    best_len := 80
+    best_trades := tt80
+    best_pf := pf80
+    best_wr := wr80
+    found_valid_len := true
+    found_valid_len
+if not na(r90) and r90 > best_score
+    best_score := r90
+    best_len := 90
+    best_trades := tt90
+    best_pf := pf90
+    best_wr := wr90
+    found_valid_len := true
+    found_valid_len
+if not na(r100) and r100 > best_score
+    best_score := r100
+    best_len := 100
+    best_trades := tt100
+    best_pf := pf100
+    best_wr := wr100
+    found_valid_len := true
+    found_valid_len
+if not na(r110) and r110 > best_score
+    best_score := r110
+    best_len := 110
+    best_trades := tt110
+    best_pf := pf110
+    best_wr := wr110
+    found_valid_len := true
+    found_valid_len
+if not na(r120) and r120 > best_score
+    best_score := r120
+    best_len := 120
+    best_trades := tt120
+    best_pf := pf120
+    best_wr := wr120
+    found_valid_len := true
+    found_valid_len
+if not na(r130) and r130 > best_score
+    best_score := r130
+    best_len := 130
+    best_trades := tt130
+    best_pf := pf130
+    best_wr := wr130
+    found_valid_len := true
+    found_valid_len
+if not na(r140) and r140 > best_score
+    best_score := r140
+    best_len := 140
+    best_trades := tt140
+    best_pf := pf140
+    best_wr := wr140
+    found_valid_len := true
+    found_valid_len
+if not na(r150) and r150 > best_score
+    best_score := r150
+    best_len := 150
+    best_trades := tt150
+    best_pf := pf150
+    best_wr := wr150
+    found_valid_len := true
+    found_valid_len
+if not na(r160) and r160 > best_score
+    best_score := r160
+    best_len := 160
+    best_trades := tt160
+    best_pf := pf160
+    best_wr := wr160
+    found_valid_len := true
+    found_valid_len
+if not na(r170) and r170 > best_score
+    best_score := r170
+    best_len := 170
+    best_trades := tt170
+    best_pf := pf170
+    best_wr := wr170
+    found_valid_len := true
+    found_valid_len
+if not na(r180) and r180 > best_score
+    best_score := r180
+    best_len := 180
+    best_trades := tt180
+    best_pf := pf180
+    best_wr := wr180
+    found_valid_len := true
+    found_valid_len
+if not na(r190) and r190 > best_score
+    best_score := r190
+    best_len := 190
+    best_trades := tt190
+    best_pf := pf190
+    best_wr := wr190
+    found_valid_len := true
+    found_valid_len
+if not na(r200) and r200 > best_score
+    best_score := r200
+    best_len := 200
+    best_trades := tt200
+    best_pf := pf200
+    best_wr := wr200
+    found_valid_len := true
+    found_valid_len
+if not na(r210) and r210 > best_score
+    best_score := r210
+    best_len := 210
+    best_trades := tt210
+    best_pf := pf210
+    best_wr := wr210
+    found_valid_len := true
+    found_valid_len
+if not na(r220) and r220 > best_score
+    best_score := r220
+    best_len := 220
+    best_trades := tt220
+    best_pf := pf220
+    best_wr := wr220
+    found_valid_len := true
+    found_valid_len
+if not na(r230) and r230 > best_score
+    best_score := r230
+    best_len := 230
+    best_trades := tt230
+    best_pf := pf230
+    best_wr := wr230
+    found_valid_len := true
+    found_valid_len
+if not na(r240) and r240 > best_score
+    best_score := r240
+    best_len := 240
+    best_trades := tt240
+    best_pf := pf240
+    best_wr := wr240
+    found_valid_len := true
+    found_valid_len
+if not na(r250) and r250 > best_score
+    best_score := r250
+    best_len := 250
+    best_trades := tt250
+    best_pf := pf250
+    best_wr := wr250
+    found_valid_len := true
+    found_valid_len
+if not na(r260) and r260 > best_score
+    best_score := r260
+    best_len := 260
+    best_trades := tt260
+    best_pf := pf260
+    best_wr := wr260
+    found_valid_len := true
+    found_valid_len
+if not na(r270) and r270 > best_score
+    best_score := r270
+    best_len := 270
+    best_trades := tt270
+    best_pf := pf270
+    best_wr := wr270
+    found_valid_len := true
+    found_valid_len
+if not na(r280) and r280 > best_score
+    best_score := r280
+    best_len := 280
+    best_trades := tt280
+    best_pf := pf280
+    best_wr := wr280
+    found_valid_len := true
+    found_valid_len
+if not na(r290) and r290 > best_score
+    best_score := r290
+    best_len := 290
+    best_trades := tt290
+    best_pf := pf290
+    best_wr := wr290
+    found_valid_len := true
+    found_valid_len
+if not na(r300) and r300 > best_score
+    best_score := r300
+    best_len := 300
+    best_trades := tt300
+    best_pf := pf300
+    best_wr := wr300
+    found_valid_len := true
+    found_valid_len
+if not na(r310) and r310 > best_score
+    best_score := r310
+    best_len := 310
+    best_trades := tt310
+    best_pf := pf310
+    best_wr := wr310
+    found_valid_len := true
+    found_valid_len
+if not na(r320) and r320 > best_score
+    best_score := r320
+    best_len := 320
+    best_trades := tt320
+    best_pf := pf320
+    best_wr := wr320
+    found_valid_len := true
+    found_valid_len
+if not na(r330) and r330 > best_score
+    best_score := r330
+    best_len := 330
+    best_trades := tt330
+    best_pf := pf330
+    best_wr := wr330
+    found_valid_len := true
+    found_valid_len
+if not na(r340) and r340 > best_score
+    best_score := r340
+    best_len := 340
+    best_trades := tt340
+    best_pf := pf340
+    best_wr := wr340
+    found_valid_len := true
+    found_valid_len
+if not na(r350) and r350 > best_score
+    best_score := r350
+    best_len := 350
+    best_trades := tt350
+    best_pf := pf350
+    best_wr := wr350
+    found_valid_len := true
+    found_valid_len
+if not na(r360) and r360 > best_score
+    best_score := r360
+    best_len := 360
+    best_trades := tt360
+    best_pf := pf360
+    best_wr := wr360
+    found_valid_len := true
+    found_valid_len
+if not na(r370) and r370 > best_score
+    best_score := r370
+    best_len := 370
+    best_trades := tt370
+    best_pf := pf370
+    best_wr := wr370
+    found_valid_len := true
+    found_valid_len
+if not na(r380) and r380 > best_score
+    best_score := r380
+    best_len := 380
+    best_trades := tt380
+    best_pf := pf380
+    best_wr := wr380
+    found_valid_len := true
+    found_valid_len
+if not na(r390) and r390 > best_score
+    best_score := r390
+    best_len := 390
+    best_trades := tt390
+    best_pf := pf390
+    best_wr := wr390
+    found_valid_len := true
+    found_valid_len
+if not na(r400) and r400 > best_score
+    best_score := r400
+    best_len := 400
+    best_trades := tt400
+    best_pf := pf400
+    best_wr := wr400
+    found_valid_len := true
+    found_valid_len
+if not na(r410) and r410 > best_score
+    best_score := r410
+    best_len := 410
+    best_trades := tt410
+    best_pf := pf410
+    best_wr := wr410
+    found_valid_len := true
+    found_valid_len
+if not na(r420) and r420 > best_score
+    best_score := r420
+    best_len := 420
+    best_trades := tt420
+    best_pf := pf420
+    best_wr := wr420
+    found_valid_len := true
+    found_valid_len
+if not na(r430) and r430 > best_score
+    best_score := r430
+    best_len := 430
+    best_trades := tt430
+    best_pf := pf430
+    best_wr := wr430
+    found_valid_len := true
+    found_valid_len
+if not na(r440) and r440 > best_score
+    best_score := r440
+    best_len := 440
+    best_trades := tt440
+    best_pf := pf440
+    best_wr := wr440
+    found_valid_len := true
+    found_valid_len
+if not na(r450) and r450 > best_score
+    best_score := r450
+    best_len := 450
+    best_trades := tt450
+    best_pf := pf450
+    best_wr := wr450
+    found_valid_len := true
+    found_valid_len
+if not na(r460) and r460 > best_score
+    best_score := r460
+    best_len := 460
+    best_trades := tt460
+    best_pf := pf460
+    best_wr := wr460
+    found_valid_len := true
+    found_valid_len
+if not na(r470) and r470 > best_score
+    best_score := r470
+    best_len := 470
+    best_trades := tt470
+    best_pf := pf470
+    best_wr := wr470
+    found_valid_len := true
+    found_valid_len
+if not na(r480) and r480 > best_score
+    best_score := r480
+    best_len := 480
+    best_trades := tt480
+    best_pf := pf480
+    best_wr := wr480
+    found_valid_len := true
+    found_valid_len
+if not na(r490) and r490 > best_score
+    best_score := r490
+    best_len := 490
+    best_trades := tt490
+    best_pf := pf490
+    best_wr := wr490
+    found_valid_len := true
+    found_valid_len
+if not na(r500) and r500 > best_score
+    best_score := r500
+    best_len := 500
+    best_trades := tt500
+    best_pf := pf500
+    best_wr := wr500
+    found_valid_len := true
+    found_valid_len
+
+// Precalculate EMAs
+ema10 = ta.ema(close, 10)
+ema20 = ta.ema(close, 20)
+ema30 = ta.ema(close, 30)
+ema40 = ta.ema(close, 40)
+ema50 = ta.ema(close, 50)
+ema60 = ta.ema(close, 60)
+ema70 = ta.ema(close, 70)
+ema80 = ta.ema(close, 80)
+ema90 = ta.ema(close, 90)
+ema100 = ta.ema(close, 100)
+ema110 = ta.ema(close, 110)
+ema120 = ta.ema(close, 120)
+ema130 = ta.ema(close, 130)
+ema140 = ta.ema(close, 140)
+ema150 = ta.ema(close, 150)
+ema160 = ta.ema(close, 160)
+ema170 = ta.ema(close, 170)
+ema180 = ta.ema(close, 180)
+ema190 = ta.ema(close, 190)
+ema200 = ta.ema(close, 200)
+ema210 = ta.ema(close, 210)
+ema220 = ta.ema(close, 220)
+ema230 = ta.ema(close, 230)
+ema240 = ta.ema(close, 240)
+ema250 = ta.ema(close, 250)
+ema260 = ta.ema(close, 260)
+ema270 = ta.ema(close, 270)
+ema280 = ta.ema(close, 280)
+ema290 = ta.ema(close, 290)
+ema300 = ta.ema(close, 300)
+ema310 = ta.ema(close, 310)
+ema320 = ta.ema(close, 320)
+ema330 = ta.ema(close, 330)
+ema340 = ta.ema(close, 340)
+ema350 = ta.ema(close, 350)
+ema360 = ta.ema(close, 360)
+ema370 = ta.ema(close, 370)
+ema380 = ta.ema(close, 380)
+ema390 = ta.ema(close, 390)
+ema400 = ta.ema(close, 400)
+ema410 = ta.ema(close, 410)
+ema420 = ta.ema(close, 420)
+ema430 = ta.ema(close, 430)
+ema440 = ta.ema(close, 440)
+ema450 = ta.ema(close, 450)
+ema460 = ta.ema(close, 460)
+ema470 = ta.ema(close, 470)
+ema480 = ta.ema(close, 480)
+ema490 = ta.ema(close, 490)
+ema500 = ta.ema(close, 500)
+
+// Select correct EMA based on best_len
+selected_ema = na(best_len) ? na : best_len == 10 ? ema10 : best_len == 20 ? ema20 : best_len == 30 ? ema30 : best_len == 40 ? ema40 : best_len == 50 ? ema50 : best_len == 60 ? ema60 : best_len == 70 ? ema70 : best_len == 80 ? ema80 : best_len == 90 ? ema90 : best_len == 100 ? ema100 : best_len == 110 ? ema110 : best_len == 120 ? ema120 : best_len == 130 ? ema130 : best_len == 140 ? ema140 : best_len == 150 ? ema150 : best_len == 160 ? ema160 : best_len == 170 ? ema170 : best_len == 180 ? ema180 : best_len == 190 ? ema190 : best_len == 200 ? ema200 : best_len == 210 ? ema210 : best_len == 220 ? ema220 : best_len == 230 ? ema230 : best_len == 240 ? ema240 : best_len == 250 ? ema250 : best_len == 260 ? ema260 : best_len == 270 ? ema270 : best_len == 280 ? ema280 : best_len == 290 ? ema290 : best_len == 300 ? ema300 : best_len == 310 ? ema310 : best_len == 320 ? ema320 : best_len == 330 ? ema330 : best_len == 340 ? ema340 : best_len == 350 ? ema350 : best_len == 360 ? ema360 : best_len == 370 ? ema370 : best_len == 380 ? ema380 : best_len == 390 ? ema390 : best_len == 400 ? ema400 : best_len == 410 ? ema410 : best_len == 420 ? ema420 : best_len == 430 ? ema430 : best_len == 440 ? ema440 : best_len == 450 ? ema450 : best_len == 460 ? ema460 : best_len == 470 ? ema470 : best_len == 480 ? ema480 : best_len == 490 ? ema490 : best_len == 500 ? ema500 : na
+
+// Now plot selected EMA
+plot(selected_ema, color = color.blue, title = 'Optimal EMA', linewidth = 2)
+
+var table stats_table = table.new(position = position.top_right, columns = 2, rows = 5, bgcolor = color.new(color.black, 85), border_width = 1)
+
+if barstate.islast and show_table
+    if not na(best_len)
+        table.cell(stats_table, 0, 0, 'Best EMA Length', text_color = color.white)
+        table.cell(stats_table, 1, 0, str.tostring(best_len), text_color = color.white)
+        table.cell(stats_table, 0, 1, 'Total Trades', text_color = color.white)
+        table.cell(stats_table, 1, 1, str.tostring(best_trades), text_color = color.white)
+        table.cell(stats_table, 0, 2, 'Profit Factor', text_color = color.white)
+        table.cell(stats_table, 1, 2, str.tostring(best_pf, '#.##'), text_color = color.white)
+        table.cell(stats_table, 0, 3, 'Win Rate (%)', text_color = color.white)
+        table.cell(stats_table, 1, 3, str.tostring(best_wr * 100, '#.#'), text_color = color.white)
+        table.cell(stats_table, 0, 4, 'Robustness', text_color = color.white)
+        table.cell(stats_table, 1, 4, str.tostring(best_score, '#.##'), text_color = color.white)
+    else
+        table.cell(stats_table, 0, 0, 'Best EMA Length', text_color = color.gray)
+        table.cell(stats_table, 1, 0, 'Calculating...', text_color = color.gray)
+        table.cell(stats_table, 0, 1, 'Total Trades', text_color = color.gray)
+        table.cell(stats_table, 1, 1, '--', text_color = color.gray)
+        table.cell(stats_table, 0, 2, 'Profit Factor', text_color = color.gray)
+        table.cell(stats_table, 1, 2, '--', text_color = color.gray)
+        table.cell(stats_table, 0, 3, 'Win Rate (%)', text_color = color.gray)
+        table.cell(stats_table, 1, 3, '--', text_color = color.gray)
+        table.cell(stats_table, 0, 4, 'Robustness', text_color = color.gray)
+        table.cell(stats_table, 1, 4, '--', text_color = color.gray)

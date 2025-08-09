@@ -1,0 +1,88 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © tkarolak
+//@version=5
+
+// ====================
+// ==== Background ====
+// ====================
+
+// This indicator assesses bullish or bearish bias based on the share of bullish candles
+// within a standard deviation channel using historical price and volume data. Bias is
+// calculated by evaluating the share of bullish candles in the total share over a
+// specified lookback period. If the share of bullish candles exceeds 50%, it signals a
+// bullish bias, while below 50% indicates a bearish bias. Traders use this calculation
+// to gauge market sentiment for trading decisions.
+
+// Hypothesis:
+// - Bullish Bias: A high share of bullish candles within the channel suggests a bullish bias.
+// - Bearish Bias: A high share of bullish candles within the channel suggests a bearish bias.
+
+// Usage:
+// 1. Customize settings to match your trading strategy.
+// 2. Set upper and lower lines to define the share range of interest.
+// 3. Interpret the indicator:
+//    - Bullish Bias: Indicator > 50
+//    - Overbought Territory: Above the upper share boundary.
+//    - Bearish Bias: Indicator < 50
+//    - Oversold Territory: Below the lower share boundary.
+// 4. Confirm sufficient volume data.
+// 5. Use the share of bullish candles' bias information in conjunction with other indicators for trading decisions.
+
+
+indicator("Bias of Volume Share inside Std Deviation Channel", shorttitle="Bias of Volume Share", max_bars_back = 2000, overlay=false, format = format.price)
+
+// Custom types
+type SettingsBias
+    float   source
+    int     lookback
+    float   sigma
+    int     smoothing
+
+// Settings Group & Tooltips
+string gBiasVolume      = "Bias of Volume Setting"
+string ttLookbackBias   = "Specifies the number of historical bars to analyze."
+string ttChannelBias    = "Set upper and lower lines to detect bullish/bearish zones."
+string ttSmoothingBias  = "Determines the length of smoothing for the calculated volume share."
+string ttSigmaBias      = "This parameter allows you to specify the width of the Standard Deviation Range around the average price by defining the number of standard deviations to include in calculations. A higher value results in a wider channel, encompassing a larger price range, while a lower value narrows the channel, focusing on a smaller price range for analysis."
+
+// Initialize the settings for Bias of Volume Share Indicator
+SettingsBias settingsBias =
+ SettingsBias.new(
+   input.source (close, "Source",                                   group = gBiasVolume),
+   input.int    (500,   "Number of Bars",                           group = gBiasVolume, minval=1, maxval=2000, tooltip = ttLookbackBias),
+   input.float  (3.0,   "Standard Deviation Channel Width (Sigma)", group = gBiasVolume, minval = 1, maxval = 4, tooltip = ttSigmaBias),
+   input.int    (3,     "Share Smoothing Length",                   group = gBiasVolume, tooltip = ttSmoothingBias)
+   )
+settingsBiasUpper = input.float(55,     "Upper Line", group = gBiasVolume, minval = 50, maxval = 100, tooltip = ttChannelBias)
+settingsBiasLower = input.float(45,     "Lower Line", group = gBiasVolume, minval = 0, maxval = 50, tooltip = ttChannelBias)
+
+bool  confirmed = barstate.isconfirmed
+
+if barstate.islast and ta.cum(volume) == 0
+    runtime.error("No volume is provided by the data vendor.")
+
+float priceDev        = ta.stdev(settingsBias.source,settingsBias.lookback)
+float averagePrice    = ta.sma(settingsBias.source,settingsBias.lookback)
+float stdDevChannelVolumeBull = 0.0
+float stdDevChannelVolumeBear = 0.0
+
+for bars = 0 to settingsBias.lookback - 1 by 1
+    if confirmed and bar_index >= settingsBias.lookback
+        stdDevChannelVolumeBull := close[bars] > open[bars] and settingsBias.source[bars] > averagePrice - settingsBias.sigma * priceDev and settingsBias.source[bars] < averagePrice + settingsBias.sigma * priceDev ? stdDevChannelVolumeBull + volume[bars] : stdDevChannelVolumeBull
+        stdDevChannelVolumeBear := close[bars] < open[bars] and settingsBias.source[bars] > averagePrice - settingsBias.sigma * priceDev and settingsBias.source[bars] < averagePrice + settingsBias.sigma * priceDev ? stdDevChannelVolumeBear + volume[bars] : stdDevChannelVolumeBear
+
+float bullishSharestdDevChannelVolumeBull = ta.sma(stdDevChannelVolumeBull / (stdDevChannelVolumeBear+stdDevChannelVolumeBull) * 100,settingsBias.smoothing)
+color colorLine = bullishSharestdDevChannelVolumeBull >= 50 ? color.green : color.red
+
+////////////////////////////////////////////////////////////////////////////////
+//                     ====== DRAWING and PLOTTING ======                     //
+////////////////////////////////////////////////////////////////////////////////
+
+// Zero hline and channel
+upperx = hline(settingsBiasUpper, 'Upper Line', color.new(color.silver, 60))
+median = hline(50, 'Median', color.orange, hline.style_dotted)
+lowerx = hline(settingsBiasLower, 'Lower Line', color.new(color.silver, 60))
+
+plot(bullishSharestdDevChannelVolumeBull,"Bullish Volume Share at STD Channel",color=colorLine)
+color bgcolor = bullishSharestdDevChannelVolumeBull > settingsBiasUpper ? color.new(color.green,85) : (bullishSharestdDevChannelVolumeBull < settingsBiasLower ? color.new(color.red,85) : na) 
+bgcolor(bgcolor)

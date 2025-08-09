@@ -1,0 +1,68 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DskyzInvestments
+
+//@version=6
+indicator("(MVD) Meta-Volatility Divergence (DAFE)", overlay=false, max_bars_back=500)
+
+// === USER INPUTS ===
+lenATR = input.int(14, "ATR Length")
+lenStdev = input.int(14, "Stdev Length")
+lenRange = input.int(14, "Range Length")
+mvdLookback = input.int(20, "MVD Lookback (for Z-Score)")
+showDashboard = input.bool(true, "Show Dashboard")
+showInfoLabel = input.bool(true, "Show Compact Info Label")
+
+// === VOLATILITY MEASURES ===
+atr_val = ta.atr(lenATR)
+stdev_val = ta.stdev(close, lenStdev)
+range_val = ta.sma(high - low, lenRange)
+
+// === VoVix Calculation ===
+atr_fast = ta.atr(5)
+atr_slow = ta.atr(34)
+atr_stdev = ta.stdev(ta.atr(5), 21)
+vovix = (atr_fast - atr_slow) / (atr_stdev + 1e-6)
+
+// === MVD CALCULATION ===
+vol_sum = atr_val + stdev_val + range_val + vovix
+vol_mean = vol_sum / 4
+mad = (math.abs(atr_val - vol_mean) + math.abs(stdev_val - vol_mean) + math.abs(range_val - vol_mean) + math.abs(vovix - vol_mean)) / 4
+mad_sma = ta.sma(mad, mvdLookback)
+mad_stdev = ta.stdev(mad, mvdLookback)
+mvd_z = mad_stdev != 0 ? (mad - mad_sma) / mad_stdev : 0
+
+// === DYNAMIC COLORING ===
+centerColor = color.new(color.yellow, 0)
+highColor = color.new(color.green, 0)
+lowColor = color.new(color.green, 0)
+mainColor = mvd_z > 2 ? highColor : mvd_z < -2 ? lowColor : centerColor
+
+// === PLOT LINES ===
+plot(mvd_z, color=mainColor, linewidth=4, title="MVD Z-Score")
+hline(2, "High Threshold", highColor, hline.style_dashed, 2)
+hline(-2, "Low Threshold", lowColor, hline.style_dashed, 2)
+plot(0, color=color.gray, linewidth=1, title="Zero Line")
+
+// === DASHBOARD ===
+if showDashboard
+    var table dash = na
+    if na(dash)
+        dash := table.new(position.middle_right, 1, 6, bgcolor=color.new(color.black, 90), border_color=color.new(color.yellow, 80), border_width=1)
+    table.clear(dash, 0, 0)
+ 
+    table.cell(dash, 0, 0, "Meta-Volatility Divergence", text_color=color.yellow, text_size=size.small, bgcolor=color.new(color.black, 0))
+    table.cell(dash, 0, 1, "ATR: " + str.tostring(atr_val, "#.##"), text_color=color.aqua, text_size=size.small)
+    table.cell(dash, 0, 2, "Stdev: " + str.tostring(stdev_val, "#.##"), text_color=color.orange, text_size=size.small)
+    table.cell(dash, 0, 3, "VoVix: " + str.tostring(vovix, "#.##"), text_color=color.purple, text_size=size.small)
+    table.cell(dash, 0, 5, "MVD Z: " + str.tostring(mvd_z, "#.##"), text_color=color.yellow, text_size=size.small)
+    table.cell(dash, 0, 5, "(DAFE) Trading Systems", text_color=color.new(color.green, 0), text_size=size.small, bgcolor=color.new(color.black, 0))
+// === MOBILE/COMPACT INFO LABEL (TOP RIGHT) ===
+if showInfoLabel
+    labelText = "MVD Z: " + str.tostring(mvd_z, "#.##") + " | ATR: " + str.tostring(atr_val, "#.##") + " | Stdev: " + str.tostring(stdev_val, "#.##") + " | VoVix: " + str.tostring(vovix, "#.##")
+    var label mobLabel = na
+    if na(mobLabel)
+        mobLabel := label.new(bar_index, na, labelText, xloc.bar_index, yloc.price, color.new(color.black, 80), label.style_label_left, color.white, size.small)
+    label.set_xy(mobLabel, bar_index, na)
+    label.set_text(mobLabel, labelText)
+    label.set_textcolor(mobLabel, mainColor)
+    label.set_style(mobLabel, label.style_label_left)
