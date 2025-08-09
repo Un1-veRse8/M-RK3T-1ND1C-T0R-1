@@ -1,0 +1,230 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/  
+// © PhenLabs 
+
+//@version=6
+indicator('Navier-Cauchy Market Elasticity [PhenLabs]', shorttitle = 'NCME - PhenLabs', overlay = false)
+
+//==============================================================================
+// Input Parameters - Organized by Category
+//==============================================================================
+
+// Display settings
+var g_display = 'Display Settings'
+displayStyle = input.string('Advanced', 'Display Style', options = ['Histogram', 'Line', 'Both', 'Advanced'], group = g_display)
+smoothingPeriod = input.int(3, 'Smoothing Period', minval = 1, tooltip = 'Number of periods for moving average smoothing (1 = no smoothing)', group = g_display)
+showBands = input.bool(true, 'Show Reference Bands', tooltip = 'Display upper and lower reference bands for extreme values', group = g_display)
+showZones = input.bool(true, 'Show Background Zones', tooltip = 'Color background based on stress levels', group = g_display)
+showGradient = input.bool(true, 'Enable Gradient Effects', tooltip = 'Use gradient coloring for smoother transitions', group = g_display)
+
+// Advanced mode options
+var g_advanced = 'Advanced Mode Options'
+showGlow = input.bool(true, 'Show Glow Effect', tooltip = 'Enable glow effect in advanced mode', group = g_advanced)
+showMomentumRibbon = input.bool(false, 'Show Momentum Ribbon', tooltip = 'Display momentum ribbon overlay', group = g_advanced)
+showExtremeDots = input.bool(true, 'Show Extreme Dots', tooltip = 'Mark extreme values with dots', group = g_advanced)
+reducedOpacity = input.bool(true, 'Reduced Opacity Mode', tooltip = 'Use more subtle colors in advanced mode', group = g_advanced)
+
+// Core parameters
+var g_core = 'Elasticity Parameters'
+lengthDisplacement = input.int(14, 'Displacement Length', minval = 1, tooltip = 'The lookback period for measuring price displacement (strain)', group = g_core)
+lengthElasticity = input.int(30, 'Elasticity Length', minval = 1, tooltip = 'The period for calculating market elasticity based on volatility', group = g_core)
+poissonRatio = input.float(0.3, 'Poisson Ratio', minval = 0, maxval = 0.5, step = 0.05, tooltip = 'Theoretical ratio of lateral to axial strain (0.3 is standard for most markets)', group = g_core)
+stressMultiplier = input.float(100, 'Stress Multiplier', minval = 1, tooltip = 'Scaling factor to make stress values more visible', group = g_core)
+
+// Color settings - Modern palette
+var g_colors = 'Color Settings'
+colorScheme = input.string('Modern', 'Color Scheme', options = ['Modern', 'Classic', 'Neon', 'Ocean', 'Fire'], group = g_colors)
+
+// Define color schemes
+bullishColor = colorScheme == 'Modern' ? color.new(#26D0CE, 0) : 
+               colorScheme == 'Classic' ? color.new(#00C176, 0) :
+               colorScheme == 'Neon' ? color.new(#00FF88, 0) :
+               colorScheme == 'Ocean' ? color.new(#00B4D8, 0) :
+               color.new(#FFB700, 0)
+
+bullishStrongColor = colorScheme == 'Modern' ? color.new(#1A9B9A, 0) : 
+                     colorScheme == 'Classic' ? color.new(#009959, 0) :
+                     colorScheme == 'Neon' ? color.new(#00CC66, 0) :
+                     colorScheme == 'Ocean' ? color.new(#0077B6, 0) :
+                     color.new(#FF8C00, 0)
+
+bearishColor = colorScheme == 'Modern' ? color.new(#E06B9D, 0) : 
+               colorScheme == 'Classic' ? color.new(#FF6B6B, 0) :
+               colorScheme == 'Neon' ? color.new(#FF1744, 0) :
+               colorScheme == 'Ocean' ? color.new(#F72585, 0) :
+               color.new(#DC2F02, 0)
+
+bearishStrongColor = colorScheme == 'Modern' ? color.new(#B84A7D, 0) : 
+                     colorScheme == 'Classic' ? color.new(#DE4747, 0) :
+                     colorScheme == 'Neon' ? color.new(#D50000, 0) :
+                     colorScheme == 'Ocean' ? color.new(#B5179E, 0) :
+                     color.new(#9D0208, 0)
+
+neutralColor = color.new(#7B8794, 60)
+zeroLineColor = color.new(#FFFFFF, 80)
+bandsColor = color.new(#FFFFFF, 90)
+bgColor = color.new(#1E222D, 0)
+
+//==============================================================================
+// Calculations
+//==============================================================================
+
+// Constants
+var float lambda = 0.0
+var float mu = 0.0
+
+// Calculate price displacements (analogous to strain)
+priceChange = ta.change(close, lengthDisplacement)
+priceStrain = priceChange / close[lengthDisplacement]
+
+// Calculate "elasticity modulus" based on historical volatility
+volatility = ta.stdev(close, lengthElasticity) / ta.sma(close, lengthElasticity)
+youngsModulus = 1 / volatility // Higher volatility = lower elasticity
+
+// Update Lamé parameters (from elasticity theory)
+lambda := youngsModulus * poissonRatio / ((1 + poissonRatio) * (1 - 2 * poissonRatio))
+mu := youngsModulus / (2 * (1 + poissonRatio))
+
+// Calculate stress tensor components (simplified for 1D)
+normalStress = (lambda + 2 * mu) * priceStrain
+
+// Final stress value (scaled for visibility)
+stressValue = normalStress * stressMultiplier
+
+// Apply smoothing
+smoothedStress = ta.sma(stressValue, smoothingPeriod)
+
+// Normalize for histogram visualization
+avgStress = ta.sma(math.abs(smoothedStress), 20)
+normalizedStress = smoothedStress / (avgStress == 0 ? 1 : avgStress)
+
+// Calculate standard deviation for stress coloring
+stressDev = ta.stdev(smoothedStress, 50)
+stressDevThreshold = 1.5 * stressDev
+stressDevThreshold2 = 2.5 * stressDev
+
+// Dynamic opacity based on stress magnitude
+stressMagnitude = math.abs(smoothedStress)
+baseOpacity = displayStyle == 'Advanced' and reducedOpacity ? 70 : 100
+opacity = math.min(math.max(stressMagnitude / stressDevThreshold2 * baseOpacity, 30), baseOpacity)
+
+// Enhanced color coding with gradient support
+getStressColor(value) =>
+    if showGradient
+        ratio = math.min(math.abs(value) / stressDevThreshold2, 1)
+        if value > 0
+            value > stressDevThreshold ? color.from_gradient(ratio, 0, 1, bullishColor, bullishStrongColor) : 
+             color.from_gradient(ratio, 0, 1, color.new(bullishColor, 50), bullishColor)
+        else
+            value < -stressDevThreshold ? color.from_gradient(ratio, 0, 1, bearishColor, bearishStrongColor) : 
+             color.from_gradient(ratio, 0, 1, color.new(bearishColor, 50), bearishColor)
+    else
+        value > 0 ? value > stressDevThreshold ? bullishStrongColor : bullishColor : 
+         value < -stressDevThreshold ? bearishStrongColor : bearishColor
+
+stressColor = getStressColor(smoothedStress)
+
+// For advanced mode, create size-based visual effect through value scaling
+sizeMultiplier = displayStyle == 'Advanced' ? math.max(0.5, math.min(2, math.abs(normalizedStress))) : 1
+
+//==============================================================================
+// Visualization
+//==============================================================================
+
+// Calculate bands
+upperBand = ta.stdev(smoothedStress, lengthElasticity) * 2
+lowerBand = -upperBand
+upperBand2 = upperBand * 1.5
+lowerBand2 = lowerBand * 1.5
+
+// Background zones - Calculate colors conditionally
+topZone = smoothedStress > upperBand2
+highZone = smoothedStress > upperBand and smoothedStress <= upperBand2
+neutralZone = smoothedStress <= upperBand and smoothedStress >= lowerBand
+lowZone = smoothedStress < lowerBand and smoothedStress >= lowerBand2
+bottomZone = smoothedStress < lowerBand2
+
+// Reduce zone opacity in advanced mode
+zoneOpacity = displayStyle == 'Advanced' ? 98 : 95
+bgColorToUse = showZones ? (topZone ? color.new(bullishStrongColor, zoneOpacity) : 
+                           highZone ? color.new(bullishColor, zoneOpacity + 2) : 
+                           lowZone ? color.new(bearishColor, zoneOpacity + 2) : 
+                           bottomZone ? color.new(bearishStrongColor, zoneOpacity) : na) : na
+
+bgcolor(bgColorToUse, title = 'Stress Zones')
+
+// Zero reference line
+hline(0, 'Zero Line', color = zeroLineColor, linestyle = hline.style_solid, linewidth = 1)
+
+// Histogram plotting with dynamic visual effect through value scaling
+showHist = displayStyle == 'Histogram' or displayStyle == 'Both' or displayStyle == 'Advanced'
+// Reduce histogram prominence in advanced mode
+histScale = displayStyle == 'Advanced' ? 50 : 75
+histValue = showHist ? normalizedStress * histScale * sizeMultiplier : na
+histOpacity = displayStyle == 'Advanced' ? 100 - opacity + 20 : 100 - opacity
+plot(histValue, title = 'Stress Histogram', style = plot.style_histogram, 
+     color = color.new(stressColor, histOpacity), linewidth = 3)
+
+// Line plotting
+showLine = displayStyle == 'Line' or displayStyle == 'Both' or displayStyle == 'Advanced'
+lineValue = showLine ? smoothedStress : na
+lineWidth = displayStyle == 'Advanced' ? 2 : 3
+plot(lineValue, title = 'Stress Line', style = plot.style_line, 
+     color = stressColor, linewidth = lineWidth)
+
+// Glow effects for advanced display - more subtle
+showGlowEffect = displayStyle == 'Advanced' and showLine and showGlow
+glowValue1 = showGlowEffect ? smoothedStress : na
+plot(glowValue1, title = 'Stress Glow', style = plot.style_line, 
+     color = color.new(stressColor, 85), linewidth = 9)
+
+// Bands visualization
+upperBandPlot = showBands ? upperBand : na
+lowerBandPlot = showBands ? lowerBand : na
+p1 = plot(upperBandPlot, title = 'Upper Band', color = bandsColor, style = plot.style_line, linewidth = 1)
+p2 = plot(lowerBandPlot, title = 'Lower Band', color = bandsColor, style = plot.style_line, linewidth = 1)
+
+// Fill between bands - much more subtle in advanced mode
+fillOpacity = displayStyle == 'Advanced' ? 98 : 95
+fillColor = showBands ? color.new(neutralColor, fillOpacity) : na
+fill(p1, p2, color = fillColor, title = 'Band Fill')
+
+// Secondary bands for extreme zones - only in advanced mode
+showSecondaryBands = displayStyle == 'Advanced' and showBands
+upperBand2Plot = showSecondaryBands ? upperBand2 : na
+lowerBand2Plot = showSecondaryBands ? lowerBand2 : na
+plot(upperBand2Plot, title = 'Upper Band 2', color = color.new(bandsColor, 70), linewidth = 1)
+plot(lowerBand2Plot, title = 'Lower Band 2', color = color.new(bandsColor, 70), linewidth = 1)
+
+// Signal dots for extreme values - smaller and more subtle
+showDots = displayStyle == 'Advanced' and showExtremeDots
+dotHigh = showDots and smoothedStress > upperBand2 ? smoothedStress : na
+dotLow = showDots and smoothedStress < lowerBand2 ? smoothedStress : na
+plotshape(dotHigh, title = 'Extreme High', style = shape.circle, location = location.absolute, 
+          color = color.new(bullishStrongColor, 30), size = size.tiny)
+plotshape(dotLow, title = 'Extreme Low', style = shape.circle, location = location.absolute, 
+          color = color.new(bearishStrongColor, 30), size = size.tiny)
+
+// Momentum ribbon (optional for advanced display)
+showMomentum = displayStyle == 'Advanced' and showMomentumRibbon
+momentum = ta.change(smoothedStress, 1)
+momentumColor = momentum > 0 ? color.new(bullishColor, 90) : color.new(bearishColor, 90)
+momentumValue = showMomentum ? smoothedStress + momentum * 5 : na // Reduced from 10
+plot(momentumValue, title = 'Momentum Ribbon', style = plot.style_area, 
+     color = momentumColor, linewidth = 1)
+
+// Extreme stress lines - more subtle
+extremeHighLine = smoothedStress > upperBand2 and displayStyle == 'Advanced' ? upperBand2 : na
+extremeLowLine = smoothedStress < lowerBand2 and displayStyle == 'Advanced' ? lowerBand2 : na
+plot(extremeHighLine, title = 'Extreme High Line', color = color.new(bullishStrongColor, 70), 
+     style = plot.style_linebr, linewidth = 1)
+plot(extremeLowLine, title = 'Extreme Low Line', color = color.new(bearishStrongColor, 70), 
+     style = plot.style_linebr, linewidth = 1)
+
+//==============================================================================
+// Alerts
+//==============================================================================
+
+alertcondition(ta.crossover(smoothedStress, upperBand), title = 'High Stress', message = 'Market under high tension')
+alertcondition(ta.crossunder(smoothedStress, lowerBand), title = 'High Compression', message = 'Market under high compression')
+alertcondition(ta.crossover(smoothedStress, upperBand2), title = 'Extreme High Stress', message = 'Market under extreme tension')
+alertcondition(ta.crossunder(smoothedStress, lowerBand2), title = 'Extreme Compression', message = 'Market under extreme compression')

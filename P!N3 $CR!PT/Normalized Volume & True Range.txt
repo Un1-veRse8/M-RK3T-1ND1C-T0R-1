@@ -1,0 +1,153 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © peacefulLizard50262
+
+//@version=6
+indicator("Normalized Volume & True Range", format = format.percent)
+
+// HEAD {
+
+// enums {
+
+enum TrueRangeStyle
+    body = "Body"
+    hl = "High/Low"
+    delta = "Close/Close"
+
+// enums }
+
+
+// functions {
+
+true_range_select(simple TrueRangeStyle tr_style)=>
+    float start = switch tr_style
+        TrueRangeStyle.body => open
+        TrueRangeStyle.hl => low
+        TrueRangeStyle.delta => nz(close[1], close)
+
+    float finish = switch tr_style
+        TrueRangeStyle.body => close
+        TrueRangeStyle.hl => high
+        TrueRangeStyle.delta => close
+
+    float abs_percent = math.abs(finish - start) / math.min(finish, start)
+    abs_percent
+
+cum_avg(float source)=>
+    ta.cum(source) / (bar_index + 1)
+
+p_stdev(float source, float average)=>
+    var float p_stdev = na
+    var float vari = 0
+    var float count = -1
+
+    if source > average
+        vari += math.pow(source - average, 2)
+        count += 1
+
+    if count > 0
+        p_stdev := math.sqrt(vari / count)
+
+    p_stdev
+
+sma(float source, simple int length)=>
+    var float first_value = na
+    var bool ready = false
+
+    float sum = 0
+
+    if not ready
+        if na(first_value) and not na(source)
+            first_value := source
+            ready := true
+
+    if ready
+        for i = 0 to length - 1
+            sum += nz(source[i], first_value)
+
+    float sma = sum / length
+    sma
+
+// functions }
+
+// HEAD }
+
+
+// BODY {
+
+// inputs {
+
+var TrueRangeStyle tr_style = input.enum(TrueRangeStyle.body, "True Range Style")
+float main_scale = input.float(5, "Outlier Range", minval = 0.5, step = 0.25)
+bool show_atr = input.bool(false, "", inline = "ATR")
+int atr_length = input.int(14, "ATR        ", minval = 2, inline = "ATR")
+bool show_average_volume = input.bool(false, "", inline = "Volume")
+int volume_length = input.int(14, "Average Volume  ", minval = 2, inline = "Volume")
+bool show_baseline = input.bool(true, "Show Baselines")
+
+// inputs }
+
+
+// calculations {
+
+// { true range percent
+
+float abs_percent = true_range_select(tr_style)
+
+float avg_abs_percent = cum_avg(abs_percent)
+float p_stdev_abs_percent = p_stdev(abs_percent, avg_abs_percent)
+float abs_percent_max = avg_abs_percent + p_stdev_abs_percent * main_scale
+float normalized_avg_percent = avg_abs_percent / abs_percent_max
+
+// } true range percent
+
+
+// { volume
+
+float avg_volume = cum_avg(volume)
+float p_stdev_volume = p_stdev(volume, avg_volume)
+
+float scale_factor = avg_volume * (1 - normalized_avg_percent) / (normalized_avg_percent * p_stdev_volume)
+
+float max_volume = avg_volume + p_stdev_volume * scale_factor
+float normalized_abs_percent = math.min(abs_percent_max, abs_percent) / abs_percent_max
+float normalized_volume = math.min(volume, max_volume) / max_volume
+float normalized_avg_volume = avg_volume / max_volume
+
+// } volume
+
+
+// { averages
+
+float average_normal_tr = sma(normalized_abs_percent * 100, atr_length)
+float average_normal_volume = sma(normalized_volume * 100, volume_length)
+
+// } averages
+
+
+// { color
+
+color volume_color = open < close ? #089981 : #f23645
+
+// } color
+
+// calculations }
+
+
+// plot {
+
+display_baseline = show_baseline ? display.all : display.none
+display_atr = show_atr ? display.all : display.none
+display_volume = show_average_volume ? display.all : display.none
+
+plot(normalized_volume * 100, "Normalized Volume", volume_color, 1, plot.style_columns)
+plot(normalized_abs_percent * 100, "Normalized True Range", #fafafa, 1, plot.style_histogram)
+
+plot(normalized_avg_volume * 100, "Baseline", #BAD7F2, 3, plot.style_linebr, display = display_baseline)
+plot(average_normal_tr, "ATR", color.blue, 3, display = display_atr)
+plot(average_normal_volume, "Average Volume", color.orange, 3, display = display_volume)
+
+hline(100, "100% Max Line", #787b866e)
+
+// plot }
+
+// BODY }

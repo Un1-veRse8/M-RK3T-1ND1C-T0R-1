@@ -1,0 +1,1144 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © stormeta
+//@version=5
+indicator("Machine Learning: ARIMA + SARIMA", shorttitle = '[stormeta] ARIMA + SARIMA' ,overlay=true, max_lines_count=500)
+
+// Inputs
+model_type = input.string("SARIMA", "Model Type", options=["ARIMA", "SARIMA"], group = 'General Settings', tooltip='ARIMA - Better for direction\nSARIMA - Better for price movement')
+use_arima = model_type == "ARIMA"
+forecast_length = input.int(25, "Forecast Length", minval=1, maxval=50, group = 'General Settings', tooltip='Number of predictions into the future')
+lookback = input.int(50, "Training Period", minval=10, maxval=500, group = 'General Settings', tooltip='Data used to train data\n50 is optimal for responsiveness. Higher values may lead to lag')
+forecast_memory_options = input.string("Auto", "Memory", group = 'General Settings', options=["Low", "High", "Auto"], tooltip='How much weight is given to older data')
+p_length = input.int(1, "AR Order (p)", minval=0, maxval=5, group = 'ARIMA', tooltip = 'Autoregressive Order\nIncreasing improves pattern recognition but may overfit')
+d_diff = input.int(1, "Differencing (d)", minval=0, maxval=2, group = 'ARIMA', tooltip = 'Differencing\nMakes data stationairy (predictable). Keep as 1')
+q_length = input.int(1, "MA Order (q)", minval=0, maxval=5, group = 'ARIMA', tooltip = 'Moving Average Order\nIncreasing may make it sensitive to recent changes')
+s_period = input.int(5, "Seasonal Period (s)", minval=2, maxval=15, group = 'SARIMA', tooltip = 'Number of bars in each seasonal cycle\nRepresents repeating market patterns')
+P_length = input.int(1, "Seasonal AR Order (P)", minval=0, maxval=2, group = 'SARIMA', tooltip = 'Seasonal Autoregressive order\nIncreasing allows to detect complex seasonal patterns but may overfit')
+D_diff = input.int(1, "Seasonal Differencing (D)", minval=0, maxval=2, group = 'SARIMA', tooltip = 'Seasonal Differencing\nMakes data stationairy (predictable). Keep as 1')
+Q_length = input.int(1, "Seasonal MA Order (Q)", minval=0, maxval=2, group = 'SARIMA', tooltip = 'Seasonal Moving Average order\nModels error terms across seasons')
+src = ta.sma(close, 3)
+
+// ARIMA selected
+s_period_actual = use_arima ? 1 : s_period
+P_length_actual = use_arima ? 0 : P_length
+D_diff_actual = use_arima ? 0 : D_diff
+Q_length_actual = use_arima ? 0 : Q_length
+
+// Mumbo jumbo
+
+volatility_factor = 1.5
+smoothness = 0.6
+arima_colour = input.color(color.orange, "ARIMA Colour", group='Additional Settings')
+sarima_colour_1 = input.color(#1bc2d7, "SARIMA Colour 1", group='Additional Settings') 
+sarima_colour_2 = input.color(#17818f, "SARIMA Colour 2", group='Additional Settings') 
+
+
+// Changing memory depending on timeframe
+timeframe = timeframe.period
+is_multi_day = timeframe == "2D" or timeframe == "3D"
+forecast_memory = forecast_memory_options == "Low" ? 0.05 : forecast_memory_options == "High" ? 0.95 : timeframe.isdaily or timeframe.isweekly or timeframe.ismonthly or is_multi_day ? 0.05 : 0.95
+direction_stability = 0.2 
+stabilize_first_point = true
+
+// Create arrays to hold the windowed data
+var float[] windowed_src = array.new_float(lookback, 0.0)
+var float[] windowed_diff = array.new_float(lookback, 0.0)
+var float[] windowed_s_diff = array.new_float(lookback, 0.0)
+
+// Function to update windowed data
+update_windowed_data() =>
+    if bar_index >= 0
+        for i = 0 to math.min(lookback - 1, bar_index)
+            array.set(windowed_src, lookback - 1 - i, src[i])
+        
+        for i = 0 to lookback - 1
+            if i < lookback - 1 // Regular differencing
+                diff_val = array.get(windowed_src, i) - array.get(windowed_src, i + 1)
+                array.set(windowed_diff, i, diff_val)
+            else
+                array.set(windowed_diff, i, 0.0)
+        
+        for i = 0 to lookback - 1
+            if i + s_period_actual < lookback // Seasonal differencing
+                s_diff_val = array.get(windowed_diff, i) - array.get(windowed_diff, i + s_period_actual)
+                array.set(windowed_s_diff, i, s_diff_val)
+            else
+                array.set(windowed_s_diff, i, array.get(windowed_diff, i))
+
+update_windowed_data()
+
+// Regular diffferencing
+diff(src, d) =>
+    result = src
+    for i = 1 to d
+        result := result - (bar_index >= 1 ? result[1] : 0.0)
+    result
+
+// Seasonal differencing
+seasonal_diff(src, D, s) =>
+    result = src
+    for i = 1 to D
+        result := result - (bar_index >= s ? result[s] : 0.0)
+    result
+
+// Function to restore original values from differences (regular + seasonal)
+undiff(diffs, d, D, s, last_orig, last_seasonal) =>
+    if d == 0 and D == 0
+        diffs
+    else
+        sum = last_orig
+        
+        last_s_values = array.new_float(math.max(s, 1), last_orig)
+        
+        if s > 0
+            for i = 0 to s - 1
+                if i < bar_index
+                    array.set(last_s_values, i, src[i])
+                else
+                    array.set(last_s_values, i, last_orig)
+        
+        result = array.new_float(math.max(array.size(diffs), 1), 0)
+        
+        forecast_len = math.min(array.size(diffs), forecast_length)
+        
+        if forecast_len > 0
+            for i = 0 to forecast_len - 1
+                diff_value = i < array.size(diffs) ? nz(array.get(diffs, i), 0.0) : 0.0
+                
+                // Regular undifferencing 
+                if d > 0
+                    sum := sum - diff_value
+                else
+                    sum := diff_value
+                
+                //Seasonal undifferencing
+                if D > 0 and s > 0
+                    seasonal_pos = i % s
+                    s_value = array.get(last_s_values, seasonal_pos)
+                    // Note to self: don't add s_value to sum here - that's messing it up
+                    array.set(last_s_values, seasonal_pos, sum)
+                    // Note: This is the key change - we're no longer adding s_value to sum
+                
+                array.set(result, i, sum)
+                
+        result
+
+// Detect market characteristics
+detect_market() =>
+    vol_sum = 0.0
+    mean_sum = 0.0
+    count = 0
+    
+    vol_window = math.min(14, lookback)
+    for i = 0 to vol_window - 1
+        if i < lookback
+            vol_sum := vol_sum + math.pow(array.get(windowed_src, i) - array.get(windowed_src, i+1), 2)
+            mean_sum := mean_sum + array.get(windowed_src, i)
+            count := count + 1
+    
+    vol = count > 1 ? math.sqrt(vol_sum / count) / (mean_sum / count) : 0.01
+    
+    mom_period = math.min(math.round(lookback * 0.1), 10)
+    start_price = mom_period < lookback ? array.get(windowed_src, mom_period) : array.get(windowed_src, 0) 
+    end_price = array.get(windowed_src, 0)
+    mom = start_price > 0 ? (end_price - start_price) / start_price : 0
+    is_trending = false
+    trend_dir = 0
+
+    if lookback >= 10
+        fast_period = math.min(8, math.floor(lookback * 0.1))
+        slow_period = math.min(21, math.floor(lookback * 0.2))
+        fast_ema = array.get(windowed_src, 0)
+        slow_ema = array.get(windowed_src, 0)
+        fast_alpha = 2.0 / (fast_period + 1.0)
+        slow_alpha = 2.0 / (slow_period + 1.0)
+        
+        for i = 1 to math.min(lookback - 1, 30) 
+            fast_ema := fast_ema * (1.0 - fast_alpha) + array.get(windowed_src, i) * fast_alpha
+            slow_ema := slow_ema * (1.0 - slow_alpha) + array.get(windowed_src, i) * slow_alpha
+        
+        is_trending := math.abs(fast_ema - slow_ema) / slow_ema > 0.01
+        
+  
+        trend_dir := fast_ema > slow_ema ? -1 : 1
+    
+    // Calculate seasonality from windowed data
+    seasonal_strength = 0.0
+    if lookback >= s_period_actual * 3
+        diffs_sum = 0.0
+        abs_sum = 0.0
+        
+        for i = 0 to math.min(lookback - s_period_actual - 1, s_period_actual * 3)
+            current = array.get(windowed_src, i)
+            seasonal = array.get(windowed_src, i + s_period_actual)
+            diffs_sum := diffs_sum + math.abs(current - seasonal)
+            abs_sum := abs_sum + math.abs(current)
+        
+        // Better balance this way
+        seasonal_strength := abs_sum > 0 ? (diffs_sum / abs_sum) * 2.0 : 0.3
+    
+    [vol, mom, is_trending, trend_dir, seasonal_strength]
+
+// Function to calculate AR coefficients using very simplified yule-walker
+ar_coeffs(p) =>
+    [vol, mom, is_trending, trend_dir, seasonal_strength] = detect_market()
+    
+    if p == 0
+        array.new_float(0)
+    else
+        // Autocorrelations using windowed data
+        coeffs = array.new_float(p, 0)
+        
+        // Mean
+        mean = 0.0
+        for i = 0 to lookback - 1
+            mean := mean + array.get(windowed_s_diff, i)
+        mean := mean / lookback
+        
+        // Calculate autocorrelation function
+        acf = array.new_float(p + 1, 0)
+        
+        for lag = 0 to p
+            sum = 0.0
+            count = 0
+            
+            for i = 0 to lookback - lag - 1
+                x1 = array.get(windowed_s_diff, i) - mean
+                x2 = array.get(windowed_s_diff, i + lag) - mean
+                sum := sum + x1 * x2
+                count := count + 1
+            
+            if lag == 0
+                array.set(acf, lag, count > 0 ? sum / count : 1.0) // Variance
+            else
+                var0 = array.get(acf, 0)
+                array.set(acf, lag, var0 > 0 and count > 0 ? sum / (count * var0) : 0.0)
+        
+        // Simplified AR coefficients with more stability
+        for i = 0 to p - 1
+            coef = array.get(acf, i + 1) / array.get(acf, 0)
+            // Invert coefficient direction for ARIMA mode
+
+            
+            if is_trending
+                trend_factor = math.max(0.03, 0.15 - lookback/1000) * (1 + p/12)
+                trend_bias = trend_factor * (-trend_dir) * (1 - i/p)  // Note the negative sign
+                coef := coef + trend_bias
+            
+            
+            coef := math.max(math.min(coef, 0.95), -0.95) // Allow for more mean-reversion in coefficients. Otherwise, dodgy
+            array.set(coeffs, i, coef)
+        
+        coeffs
+
+// Function to calculate seasonal AR coefficients - enhanced for natural patterns
+seasonal_ar_coeffs(P, s) =>
+    [vol, mom, is_trending, trend_dir, seasonal_strength] = detect_market()
+    
+    if P == 0 or use_arima 
+        array.new_float(0)
+    else
+        // Seasonal autocorrelations using windowed data
+        coeffs = array.new_float(P, 0)
+        
+        mean = 0.0
+        for i = 0 to lookback - 1
+            mean := mean + array.get(windowed_s_diff, i)
+        mean := mean / lookback
+        
+        // Calculate seasonal autocorrelation function
+        s_acf = array.new_float(P + 1, 0)
+        
+        for lag = 0 to P
+            sum = 0.0
+            count = 0
+            
+            for i = 0 to lookback - lag * s - 1
+                if i + lag * s < lookback
+                    x1 = array.get(windowed_s_diff, i) - mean
+                    x2 = array.get(windowed_s_diff, i + lag * s) - mean
+                    sum := sum + x1 * x2
+                    count := count + 1
+            
+            if lag == 0
+                array.set(s_acf, lag, count > 0 ? sum / count : 1.0) // Variance
+            else
+                var0 = array.get(s_acf, 0)
+                array.set(s_acf, lag, var0 > 0 and count > 0 ? sum / (count * var0) : 0.0)
+        
+        // Better balance for seasonal elements
+        for i = 0 to P - 1
+            coef = array.get(s_acf, i + 1)
+            
+            coef := coef * (0.8 + seasonal_strength * 2.2)
+            
+            coef := math.max(math.min(coef, 0.95), -0.95)
+            array.set(coeffs, i, coef)
+        
+        coeffs
+
+// Highly sensitive MA coefficient calculation
+ma_coeffs(q) =>
+    [vol, mom, is_trending, trend_dir, seasonal_strength] = detect_market()
+    
+    coeffs = array.new_float(q, 0)
+    for i = 0 to q - 1
+        // Amplify coefficient based on q value. Q is sm more senseitive
+        q_factor = 0.5 + (q * 0.2)  // Linear scaling with q
+        dynamic_coef = 0.3 * math.pow(0.8, i) * (0.8 + vol * 1.8) * q_factor
+        
+        // For ARIMA, allow coefficients to approach the limit for more dramatic effects
+        if use_arima
+            dynamic_coef := math.max(math.min(dynamic_coef, 0.98), 0.02)
+        else
+            dynamic_coef := math.max(math.min(dynamic_coef, 0.95), 0.05)
+            
+        array.set(coeffs, i, dynamic_coef)
+    coeffs
+
+// Seasonal MA coefficient calculation with better balance
+seasonal_ma_coeffs(Q, s) =>
+    [vol, mom, is_trending, trend_dir, seasonal_strength] = detect_market()
+    
+    if Q == 0 or use_arima  // Check for ARIMA mode
+        array.new_float(0)
+    else
+        coeffs = array.new_float(Q, 0)
+        for i = 0 to Q - 1
+            seasonal_coef = 0.3 * math.pow(0.85, i) * (0.7 + seasonal_strength * 2.0)
+            seasonal_coef := math.max(math.min(seasonal_coef, 0.95), 0.05)
+            array.set(coeffs, i, seasonal_coef)
+        coeffs
+
+// Function to fit SARIMA model using windowed data
+fit_sarima() =>
+    // Get regular AR coefficients
+    ar_coef = ar_coeffs(p_length)
+    
+    // Get seasonal AR coefficients
+    s_ar_coef = seasonal_ar_coeffs(P_length_actual, s_period_actual)
+    
+    // Calculate residuals using the windowed data and AR models
+    resid = array.new_float(lookback, 0)
+    
+    for i = 0 to lookback - 1
+        // Base value is the differenced and seasonally differenced data
+        base_val = array.get(windowed_s_diff, i)
+        
+        // Calculate AR prediction
+        ar_pred = 0.0
+        for j = 0 to math.min(array.size(ar_coef) - 1, p_length - 1)
+            idx = i + j + 1
+            if idx < lookback
+                ar_pred := ar_pred + array.get(ar_coef, j) * array.get(windowed_s_diff, idx)
+        
+        // Calculate seasonal AR prediction
+        s_ar_pred = 0.0
+        if array.size(s_ar_coef) > 0 and P_length_actual > 0
+            for j = 0 to math.min(array.size(s_ar_coef) - 1, P_length_actual - 1)
+                idx = i + (j + 1) * s_period_actual
+                if idx < lookback
+                    s_ar_pred := s_ar_pred + array.get(s_ar_coef, j) * array.get(windowed_s_diff, idx)
+        
+        // Residual is the difference between actual and predicted
+        residual = base_val - (ar_pred + s_ar_pred)
+        array.set(resid, i, residual)
+    
+    ma_coef = ma_coeffs(q_length)
+    
+    s_ma_coef = seasonal_ma_coeffs(Q_length_actual, s_period_actual)
+    
+    [ar_coef, ma_coef, s_ar_coef, s_ma_coef, resid]
+
+// Extract seasonal pattern from windowed data
+extract_seasonal_pattern() =>
+    // Calculate average seasonal pattern from windowed data
+    pattern = array.new_float(math.max(s_period_actual, 1), 0)
+    
+    if not use_arima and lookback >= s_period_actual * 2
+        mean = 0.0
+        for i = 0 to lookback - 1
+            mean := mean + array.get(windowed_s_diff, i)
+        mean := mean / lookback
+        
+        for i = 0 to s_period_actual - 1
+            season_sum = 0.0
+            season_count = 0
+            
+            for j = 0 to math.floor(lookback / s_period_actual) - 1
+                idx = i + j * s_period_actual
+                if idx < lookback
+                    season_sum := season_sum + (array.get(windowed_s_diff, idx) - mean)
+                    season_count := season_count + 1
+            
+            seasonal_factor = season_count > 0 ? season_sum / season_count : 0.0
+            array.set(pattern, i, seasonal_factor * 1.8)
+    
+    pattern
+
+// Memory feature
+var float[] prev_forecast = array.new_float(50, 0.0)
+
+// Add array to track forecast errors for MA component
+var float[] forecast_errors = array.new_float(50, 0.0)
+
+// Initialize arrays with valid values on first bar
+if barstate.isfirst
+    for i = 0 to 49
+        array.set(prev_forecast, i, 0.0)
+        array.set(forecast_errors, i, 0.0)
+
+// Initialize prev_forecast with valid values on first bar
+if barstate.isfirst
+    for i = 0 to 49
+        array.set(prev_forecast, i, 0.0)
+
+// Function to forecast future values with seasonal components and memory
+forecast_sarima(ar_coef, ma_coef, s_ar_coef, s_ma_coef, residuals, s_pattern, n) =>
+    [vol, mom, is_trending, trend_dir, seasonal_strength] = detect_market()
+    price_vol = 0.0
+    for i = 0 to math.min(20, lookback - 2)
+        if i + 1 < lookback
+            price_vol := price_vol + math.abs(array.get(windowed_src, i) - array.get(windowed_src, i + 1))
+    
+    avg_move = price_vol / math.min(20, lookback - 1) * volatility_factor
+    
+    fcast = array.new_float(n, 0)
+    
+    hist_len = math.max(1, p_length * 2) 
+    hist_data = array.new_float(hist_len, 0)
+
+    for i = 0 to hist_len - 1
+        if i < lookback
+            array.set(hist_data, i, array.get(windowed_s_diff, i))
+        else
+            array.set(hist_data, i, 0.0)
+
+    // Initialize seasonal history - this is where the error occurs
+    s_hist_len = math.max(1, s_period_actual * math.max(1, P_length_actual) * 2)  
+    s_hist_data = array.new_float(s_hist_len, 0)
+
+    for i = 0 to s_hist_len - 1
+        if i < lookback
+            array.set(s_hist_data, i, array.get(windowed_s_diff, i))
+        else
+            array.set(s_hist_data, i, 0.0)
+        
+    // IMPROVED: Better balanced scaling factors for natural movements
+    // IMPROVED: Better balanced scaling factors - enhanced MA impact
+    ar_scale = 1.0 + math.min(0.6, p_length / 6.0)
+    s_ar_scale = 1.0 + math.min(0.7, P_length_actual / 3.0) 
+    ma_scale = 1.0 + math.min(0.6, q_length / 5.0)  
+    s_ma_scale = 1.0 + math.min(0.5, Q_length_actual / 4.0)  
+    noise_scale = math.max(0.5, 1.0 - p_length / 10.0)
+    trend_scale = 1.0 - math.min(0.6, p_length / 10.0)
+    
+    // Generate forecasts
+    for i = 0 to n - 1
+        // Regular AR component with scaling
+        ar_part = 0.0
+        for j = 0 to array.size(ar_coef) - 1
+            idx = i - j - 1
+            if idx < 0
+                hist_idx = -idx - 1
+                if hist_idx < array.size(hist_data)
+                    ar_part := ar_part + array.get(ar_coef, j) * array.get(hist_data, hist_idx) * ar_scale
+            else
+                ar_part := ar_part + array.get(ar_coef, j) * array.get(fcast, idx) * ar_scale
+        
+        // Seasonal AR component with scaling
+        s_ar_part = 0.0
+        if array.size(s_ar_coef) > 0 and P_length_actual > 0
+            for j = 0 to array.size(s_ar_coef) - 1
+                idx = i - (j + 1) * s_period_actual
+                if idx < 0
+                    s_hist_idx = -idx - 1
+                    if s_hist_idx < array.size(s_hist_data)
+                        s_ar_part := s_ar_part + array.get(s_ar_coef, j) * array.get(s_hist_data, s_hist_idx) * s_ar_scale
+                else
+                    s_ar_part := s_ar_part + array.get(s_ar_coef, j) * array.get(fcast, idx) * s_ar_scale
+        
+        // MA component with scalingy
+        ma_part = 0.0
+        for j = 0 to array.size(ma_coef) - 1
+            idx = i - j - 1
+            if idx < 0
+                res_idx = j
+                if res_idx < array.size(residuals)
+                    // Apply exponential scaling based on q_length
+                    q_sensitivity = math.pow(2.0, q_length - 1) * ma_scale
+                    ma_part := ma_part + array.get(ma_coef, j) * array.get(residuals, res_idx) * q_sensitivity
+            else
+                // For subsequent points, use calculated forecast errors with amplified effect
+                q_sensitivity = math.pow(2.0, q_length - 1) * ma_scale
+                ma_part := ma_part + array.get(ma_coef, j) * array.get(forecast_errors, idx) * q_sensitivity
+        
+        // Seasonal MA component with scaling
+        s_ma_part = 0.0
+        if array.size(s_ma_coef) > 0 and Q_length_actual > 0
+            for j = 0 to array.size(s_ma_coef) - 1
+                res_idx = j * s_period_actual
+                if res_idx < array.size(residuals)
+                    s_ma_part := s_ma_part + array.get(s_ma_coef, j) * array.get(residuals, res_idx) * s_ma_scale
+        
+        // Add direct seasonal pattern
+        season_pos = i % math.max(s_period_actual, 1)
+        seasonal_factor = 0.0
+        if not use_arima and array.size(s_pattern) > 0 and season_pos < array.size(s_pattern)
+            seasonal_factor := array.get(s_pattern, season_pos)
+        seasonal_component = seasonal_factor * seasonal_strength * 2.5
+        
+        // better balanced component weights for natural movements + MA weights properly use q_length
+        ar_weight = 0.25 + math.min(0.1, p_length * 0.02)
+        s_ar_weight = use_arima ? 0.0 : 0.15 + math.min(0.15, P_length_actual * 0.05)  // Zero for ARIMA
+        ma_weight = 0.25 + math.min(0.1, q_length * 0.02)  // Now influenced by q_length
+        s_ma_weight = use_arima ? 0.0 : 0.3 - math.min(0.05, Q_length_actual * 0.02)  // Now uses Q_length
+        seasonal_weight = use_arima ? 0.0 : 0.6 + math.min(0.25, seasonal_strength * 0.4)  // Zero for ARIMA
+        
+        total_weight = ar_weight + s_ar_weight + ma_weight + s_ma_weight + seasonal_weight
+        if total_weight > 0
+            ar_weight := ar_weight / total_weight
+            s_ar_weight := s_ar_weight / total_weight
+            ma_weight := ma_weight / total_weight
+            s_ma_weight := s_ma_weight / total_weight
+            seasonal_weight := seasonal_weight / total_weight
+        else
+            ar_weight := 0.5
+            ma_weight := 0.5
+
+
+        mean_price = 0.0
+        for k = 0 to lookback - 1  
+            mean_price := mean_price + array.get(windowed_src, k)
+        mean_price := mean_price / lookback
+
+        // Add mean reversion component - pulls forecast back toward mean
+        mean_reversion = (mean_price - array.get(windowed_src, 0)) * 0.1 * (i + 1)
+        mean_reversion_weight = 0.3
+
+        // Include in the weighted sum
+        base_forecast = (ar_part * ar_weight)
+        if not use_arima
+            base_forecast := base_forecast + (s_ar_part * s_ar_weight) + (seasonal_component * seasonal_weight) + (s_ma_part * s_ma_weight)
+        base_forecast := base_forecast + (ma_part * ma_weight) + (mean_reversion * mean_reversion_weight)
+                
+        noise_amplitude = avg_move * math.sqrt(i + 1) / 10 * noise_scale
+        noise = math.sin(i * 3.0 + bar_index) * noise_amplitude * (0.3 + vol)
+        
+        trend_component = is_trending ? mom * trend_dir * (i + 1) * 0.008 * trend_scale : 0
+        
+        p_factor = math.min(0.15, p_length * 0.03)
+        model_weight = math.min(0.85, 0.65 + lookback / 800 + p_factor)
+        non_model_weight = 1 - model_weight
+        
+        forecast_value = (base_forecast * model_weight) + (noise * non_model_weight) + (trend_component * non_model_weight)
+        if use_arima
+    // Direct q_length influence - applies an additional adjustment to each point
+            q_effect = math.sin(i * 1.2) * (q_length * 0.01) * src * (i + 1) / 5
+            forecast_value := forecast_value + q_effect
+        if i < array.size(prev_forecast)
+            prev_value = array.get(prev_forecast, i)
+            if not na(prev_value) and prev_value != 0
+                forecast_value := (forecast_value * (1 - forecast_memory)) + (prev_value * forecast_memory)
+        
+        if i > 0
+            prev_value = array.get(fcast, i-1)
+            
+            p_smoothness_adjust = math.min(0.08, p_length * 0.008)
+            smoothness_factor = math.min(0.6, smoothness + (lookback / 2500) + p_smoothness_adjust)
+            
+            max_change = avg_move * (0.45 + smoothness_factor * 0.25) * (1.0 + i * 0.03)
+            
+            // Check if this is a seasonal pattern point - allow more change for seasonal points
+            is_seasonal_point = use_arima ? false : (i % s_period_actual == 0 or (i-1) % s_period_actual == 0)
+            if is_seasonal_point
+                max_change := max_change * 1.8
+            
+            if math.abs(forecast_value - prev_value) > max_change
+                forecast_value := prev_value + math.sign(forecast_value - prev_value) * max_change
+        
+        array.set(fcast, i, forecast_value)
+    
+
+    for i = 0 to math.min(array.size(fcast) - 1, 49)
+        // Store current forecast
+        array.set(prev_forecast, i, array.get(fcast, i))
+        
+        // Calculate and store forecast error 
+        if i == 0 and barstate.isrealtime
+            prev_forecast_value = array.get(prev_forecast, 0)
+            if not na(prev_forecast_value) and prev_forecast_value != 0
+                actual_value = src  
+                forecast_error = actual_value - prev_forecast_value
+                for j = array.size(forecast_errors) - 1 to 1
+                    array.set(forecast_errors, j, array.get(forecast_errors, j-1))
+                array.set(forecast_errors, 0, forecast_error)
+
+    fcast
+
+// For compatibility with original code
+reg_diffed = diff(src, d_diff)
+diffed = seasonal_diff(reg_diffed, D_diff_actual, s_period_actual)
+
+// Fit SARIMA model using windowed data
+[ar_coef, ma_coef, s_ar_coef, s_ma_coef, residuals] = fit_sarima()
+
+// Extract seasonal pattern from windowed data
+seasonal_pattern = extract_seasonal_pattern()
+
+// Generate forecast with minimal memory
+fcast_diff = forecast_sarima(ar_coef, ma_coef, s_ar_coef, s_ma_coef, residuals, seasonal_pattern, forecast_length)
+
+// IMPROVED: Better transition handling
+if array.size(fcast_diff) > 0 and stabilize_first_point
+    // Calculate a reasonable first diff value with dynamic lookback adjustment
+    lookback_factor = math.max(0.01, 0.07 - (lookback / 2000)) 
+    max_reasonable_change = ta.atr(14) * lookback_factor
+    current_first_diff = array.get(fcast_diff, 0)
+    reasonable_first_diff = math.max(math.min(current_first_diff, max_reasonable_change), -max_reasonable_change)
+    
+    // Apply first point constraint only if option enabled
+    array.set(fcast_diff, 0, reasonable_first_diff)
+
+// Convert forecast back to original scale
+last_src = array.get(windowed_src, 0)
+last_diff = array.get(windowed_diff, 0)
+last_s_diff = array.get(windowed_s_diff, 0)
+
+// Use undiff function to restore the original scale
+fcast_reg_diff = undiff(fcast_diff, D_diff_actual, 0, s_period_actual, last_diff, 0.0)
+fcast = undiff(fcast_reg_diff, d_diff, 0, 0, last_src, 0.0)
+
+// If using ARIMA, invert the forecast completely
+if use_arima and array.size(fcast) > 0
+    // Initialize reference price on first bar
+    var float reference_price = na
+    if na(reference_price)
+        reference_price := src
+  
+    reference_price := reference_price * 0.8 + src * 0.2
+    
+    // Create an inverted forecast but with more stability
+    for i = 0 to array.size(fcast) - 1
+        float original_val = array.get(fcast, i)
+        float diff_from_src = original_val - reference_price
+        float q_modifier = 1.0 + (q_length * 0.2) * math.sin(i * 0.8)
+        float inverted_val = reference_price - (diff_from_src * q_modifier)
+        
+        if na(inverted_val)
+            inverted_val := src
+        array.set(fcast, i, inverted_val)
+// Add after undiff but before plotting
+
+if array.size(fcast) > 0
+    first_forecast = array.get(fcast, 0)
+    max_price_pct_change = 0.005 + (50 / lookback) * 0.01  
+    max_change = src * max_price_pct_change
+
+    if math.abs(first_forecast - src) > max_change
+        corrected_first = src + math.sign(first_forecast - src) * max_change
+        array.set(fcast, 0, corrected_first)
+
+if array.size(fcast) >= 2
+    first_value = array.get(fcast, 0)
+    last_value = array.get(fcast, array.size(fcast) - 1)
+    current_direction = last_value > first_value ? 1 : -1
+    
+    var int prev_direction = na
+    if na(prev_direction)
+        prev_direction := current_direction
+    
+    if current_direction != prev_direction
+        direction_magnitude = math.abs(last_value - first_value) / first_value
+        direction_threshold = 0.0002 * direction_stability
+        
+        if direction_magnitude < direction_threshold
+            for i = 0 to array.size(fcast) - 1
+                current = array.get(fcast, i)
+                corrector = (i + 1) * 0.00005 * direction_stability * prev_direction * src
+                array.set(fcast, i, current + corrector)
+            
+            corrected_last = array.get(fcast, array.size(fcast) - 1)
+            if (corrected_last > first_value and prev_direction > 0) or 
+               (corrected_last < first_value and prev_direction < 0)
+                current_direction := prev_direction
+    
+    prev_direction := current_direction
+
+for i = 0 to forecast_length - 1
+    if i < array.size(fcast)
+        curr_val = array.get(fcast, i)
+        p_factor = 1.0 + math.min(0.6, p_length / 8.0) * 0.2
+        lookback_factor = math.max(0.8, math.min(2.0, lookback / 100)) * p_factor
+        max_deviation_pct = 0.04 * lookback_factor * (i + 1)
+        
+        if not use_arima and i % s_period_actual == 0
+            max_deviation_pct := max_deviation_pct * 1.7
+        
+        if math.abs(curr_val - src) / src > max_deviation_pct
+            adjustment_factor = 0.008 * lookback_factor * (1.0 + p_length * 0.02)
+            reasonable_val = src * (1 + adjustment_factor * (i + 1) * math.sign(curr_val - src))
+            array.set(fcast, i, reasonable_val)
+
+// First pass. Apply minimal smoothing between points with special handling for seasonal points
+for i = 1 to forecast_length - 1
+    if i < array.size(fcast)
+        prev_val = array.get(fcast, i-1)
+        curr_val = array.get(fcast, i)
+        
+        atr_period = math.max(7, math.round(lookback * 0.05))
+        
+        p_smoothness_adjust = math.min(0.08, p_length * 0.008)
+        lookback_smoothness = math.min(0.5, smoothness + (lookback / 3000) + p_smoothness_adjust)
+        
+        p_change_factor = 1.0 + math.min(0.3, p_length / 15.0)
+        smoothing_factor = math.max(0.7, math.min(1.3, 1.4 - (lookback / 800))) * p_change_factor
+        max_change = ta.atr(atr_period) * (0.5 + lookback_smoothness * 0.25) * (1 + i * 0.03) * smoothing_factor
+        
+        is_seasonal_point = use_arima ? false : (i % s_period_actual == 0 or (i-1) % s_period_actual == 0)
+        if is_seasonal_point
+            max_change := max_change * 2.0
+        
+        if math.abs(curr_val - prev_val) > max_change
+            new_val = prev_val + math.sign(curr_val - prev_val) * max_change
+            array.set(fcast, i, new_val)
+
+// Second pass. Apply minimal polynomial smoothing for overall shape while preserving natural patterns
+if array.size(fcast) >= 3
+    smoothed = array.new_float(array.size(fcast), 0)
+    
+    array.set(smoothed, 0, array.get(fcast, 0))
+    array.set(smoothed, array.size(fcast) - 1, array.get(fcast, array.size(fcast) - 1))
+    
+    for i = 1 to array.size(fcast) - 2
+        prev = array.get(fcast, i-1)
+        curr = array.get(fcast, i)
+        next = array.get(fcast, i+1)
+        
+        pos_factor = i / (array.size(fcast) - 1) 
+        
+        is_seasonal_point = use_arima ? false : (i % s_period_actual == 0 or (i-1) % s_period_actual == 0 or (i+1) % s_period_actual == 0)
+        
+        seasonal_factor = is_seasonal_point ? 0.15 : 1.0
+        
+        mid_emphasis = 0.5 - math.abs(pos_factor - 0.5)  
+        center_weight = 0.5 + (0.2 * (1 - smoothness) * mid_emphasis * seasonal_factor)
+        side_weight = (1 - center_weight) / 2
+        
+        smoothed_val = (prev * side_weight) + (curr * center_weight) + (next * side_weight)
+        
+        if is_seasonal_point
+            seasonal_preservation = 0.85  
+            smoothed_val := (smoothed_val * (1 - seasonal_preservation)) + (curr * seasonal_preservation)
+            
+        array.set(smoothed, i, smoothed_val)
+    
+    for i = 1 to array.size(fcast) - 2
+        array.set(fcast, i, array.get(smoothed, i))
+
+// Add randomized minor fluctuations 
+for i = 1 to array.size(fcast) - 1
+    curr_val = array.get(fcast, i)
+    fluctuation_pct = (math.sin(bar_index * 31.4 + i * 27.3) * 0.0007 + 
+                      math.cos(bar_index * 18.7 + i * 41.2) * 0.0005) * volatility_factor
+    
+    if use_arima or i % s_period_actual != 0
+        fluctuation_pct := fluctuation_pct * 1.5
+    
+    array.set(fcast, i, curr_val * (1 + fluctuation_pct))
+// Add these variables for tracking forecast direction
+var int direction_counter = 0  
+var bool prev_was_bullish = na  
+
+// Create multiple arrays to store historical forecasts 
+var float[] forecast_0 = array.new_float(10, 0.0)
+var float[] forecast_1 = array.new_float(10, 0.0)
+var float[] forecast_2 = array.new_float(10, 0.0)
+var float[] forecast_3 = array.new_float(10, 0.0)
+var float[] forecast_4 = array.new_float(10, 0.0)
+var float[] forecast_5 = array.new_float(10, 0.0)
+var float[] forecast_6 = array.new_float(10, 0.0)
+var float[] forecast_7 = array.new_float(10, 0.0)
+var float[] forecast_8 = array.new_float(10, 0.0)
+var float[] forecast_9 = array.new_float(10, 0.0)
+
+// Array to store bar indices when forecasts were made
+var int[] forecast_start_bars = array.new_int(10, 0)
+
+// Arrays to store historical error metrics for moving average calculation
+var float[] historical_rmse = array.new_float(10, 0.0)
+var float[] historical_mape = array.new_float(10, 0.0)
+var float rmse_pct = 0.0  // Current RMSE as percentage 
+var float mape = 0.0      // Current MAPE
+var float rmse_sma = 0.0  // 10 period SMA of RMSE%
+var float mape_sma = 0.0  // 10 period SMA of MAPE
+var int total_valid_comparisons = 0  // Number of points used in calculations
+
+// Determine current forecast direction
+bool current_is_bullish = na
+if array.size(fcast) >= 10
+    first_forecast = array.get(fcast, 0)   // 1st point (index 0)
+    fifth_forecast = array.get(fcast, forecast_length - 1)   
+    current_is_bullish := fifth_forecast > first_forecast
+
+// Update direction counter
+if not na(current_is_bullish)
+    if na(prev_was_bullish)
+        direction_counter := current_is_bullish ? 1 : -1
+    else if current_is_bullish == prev_was_bullish
+        if current_is_bullish
+            direction_counter := math.abs(direction_counter) + 1  // Bullish 
+        else
+            direction_counter := -math.abs(direction_counter) - 1  // Bearish 
+    else
+        direction_counter := current_is_bullish ? 1 : -1
+    prev_was_bullish := current_is_bullish
+
+// Store new forecasts 
+if barstate.isconfirmed and array.size(fcast) > 0
+    for i = 0 to array.size(forecast_8) - 1
+        array.set(forecast_9, i, array.get(forecast_8, i))
+    for i = 0 to array.size(forecast_7) - 1
+        array.set(forecast_8, i, array.get(forecast_7, i))
+    for i = 0 to array.size(forecast_6) - 1
+        array.set(forecast_7, i, array.get(forecast_6, i))
+    for i = 0 to array.size(forecast_5) - 1
+        array.set(forecast_6, i, array.get(forecast_5, i))
+    for i = 0 to array.size(forecast_4) - 1
+        array.set(forecast_5, i, array.get(forecast_4, i))
+    for i = 0 to array.size(forecast_3) - 1
+        array.set(forecast_4, i, array.get(forecast_3, i))
+    for i = 0 to array.size(forecast_2) - 1
+        array.set(forecast_3, i, array.get(forecast_2, i))
+    for i = 0 to array.size(forecast_1) - 1
+        array.set(forecast_2, i, array.get(forecast_1, i))
+    for i = 0 to array.size(forecast_0) - 1
+        array.set(forecast_1, i, array.get(forecast_0, i))
+    for i = 0 to math.min(array.size(forecast_0) - 1, array.size(fcast) - 1)
+        array.set(forecast_0, i, array.get(fcast, i))
+    for i = array.size(forecast_start_bars) - 1 to 1
+        array.set(forecast_start_bars, i, array.get(forecast_start_bars, i-1))
+    array.set(forecast_start_bars, 0, bar_index)
+
+// Calculate forecast accuracy by comparing past forecasts with actual prices
+if barstate.isconfirmed
+    sum_squared_pct_errors = 0.0
+    sum_abs_pct_errors = 0.0
+    count = 0
+    
+    // Process each forecast array (skip the most recent one at index 0)
+    // Forecast 1
+    forecast_bar = array.get(forecast_start_bars, 1)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_1)
+            forecasted_value = array.get(forecast_1, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+                
+    // Forecast 2
+    forecast_bar := array.get(forecast_start_bars, 2)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_2)
+            forecasted_value = array.get(forecast_2, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+                
+    // Forecast 3
+    forecast_bar := array.get(forecast_start_bars, 3)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_3)
+            forecasted_value = array.get(forecast_3, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+                
+    // Forecast 4
+    forecast_bar := array.get(forecast_start_bars, 4)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_4)
+            forecasted_value = array.get(forecast_4, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+                
+    // Forecast 5
+    forecast_bar := array.get(forecast_start_bars, 5)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_5)
+            forecasted_value = array.get(forecast_5, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+    
+    // Forecast 6
+    forecast_bar := array.get(forecast_start_bars, 6)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_6)
+            forecasted_value = array.get(forecast_6, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+    
+    // Forecast 7
+    forecast_bar := array.get(forecast_start_bars, 7)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_7)
+            forecasted_value = array.get(forecast_7, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+    
+    // Forecast 8
+    forecast_bar := array.get(forecast_start_bars, 8)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_8)
+            forecasted_value = array.get(forecast_8, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+    
+    // Forecast 9
+    forecast_bar := array.get(forecast_start_bars, 9)
+    if forecast_bar > 0 and bar_index > forecast_bar
+        bars_passed = bar_index - forecast_bar
+        if bars_passed > 0 and bars_passed <= array.size(forecast_9)
+            forecasted_value = array.get(forecast_9, bars_passed - 1)
+            if use_arima
+                reference_price = src[bars_passed]
+                forecasted_value := 2 * reference_price - forecasted_value
+            actual_value = src
+            if not na(forecasted_value) and not na(actual_value) and actual_value != 0 and forecasted_value != 0
+                pct_error = (forecasted_value - actual_value) / actual_value
+                sum_squared_pct_errors := sum_squared_pct_errors + math.pow(pct_error, 2)
+                sum_abs_pct_errors := sum_abs_pct_errors + math.abs(pct_error)
+                count := count + 1
+    
+    // Update error metrics if we have enough data
+    if count > 0
+        // Calculate current RMSE % (as percentage)
+        rmse_pct := math.sqrt(sum_squared_pct_errors / count) * 100
+        
+        // Calculate current MAPE (as percentage)
+        mape := (sum_abs_pct_errors / count) * 100
+        
+        // Scale down if errors are too high (above 20%)
+        if rmse_pct > 20
+            rmse_pct := 20 * math.log(1 + rmse_pct / 20)
+        if mape > 20
+            mape := 20 * math.log(1 + mape / 20)
+        
+        // Store total comparison count for display
+        total_valid_comparisons := count
+        
+        // Store current metrics in historical arrays for SMA calculation
+        for i = array.size(historical_rmse) - 1 to 1
+            array.set(historical_rmse, i, array.get(historical_rmse, i-1))
+            array.set(historical_mape, i, array.get(historical_mape, i-1))
+        
+        // Add current values to position 0
+        array.set(historical_rmse, 0, rmse_pct)
+        array.set(historical_mape, 0, mape)
+        
+        rmse_sum = 0.0
+        mape_sum = 0.0
+        valid_count = 0
+        
+        for i = 0 to array.size(historical_rmse) - 1
+            rmse_val = array.get(historical_rmse, i)
+            mape_val = array.get(historical_mape, i)
+            
+            if not na(rmse_val) and not na(mape_val) and rmse_val > 0 and mape_val > 0
+                rmse_sum := rmse_sum + rmse_val
+                mape_sum := mape_sum + mape_val
+                valid_count := valid_count + 1
+                
+                if valid_count >= 10
+                    break
+        
+        if valid_count > 0
+            rmse_sma := rmse_sum / valid_count
+            mape_sma := mape_sum / valid_count
+
+if barstate.islast
+    // Clear previous lines
+    var line[] forecast_lines = array.new_line(forecast_length + 1, na)
+    for i = 0 to array.size(forecast_lines) - 1
+        line.delete(array.get(forecast_lines, i))
+    
+    // Create arrays for visualization
+    var float[] forecast_prices = array.new_float(forecast_length, na)
+    var int[] forecast_times = array.new_int(forecast_length, na)
+    
+    // Calculate bar width
+    bar_width = time - time[1]
+    
+    // Only proceed with visualization if we have valid forecasts
+    if array.size(fcast) > 0
+        // Fill arrays with forecast values and times
+        for i = 0 to forecast_length - 1
+            if i < array.size(fcast)
+                array.set(forecast_prices, i, array.get(fcast, i))
+                array.set(forecast_times, i, time + (i + 1) * bar_width)
+        
+        // Draw forecast line
+        var line line_segment = na
+        
+        // Start by connecting current price to first forecast point with a smoothed transition
+        if stabilize_first_point
+            // Create a smoothed transition point halfway between current and first point
+            weight = math.min(0.7, 0.5 + lookback / 1000)
+            transition_price = (src * weight) + (array.get(forecast_prices, 0) * (1 - weight))
+            transition_time = time + bar_width / 2
+            
+            color transition_color = na
+            transition_style = line.style_solid
+            
+            transition_color := use_arima ? color.new(arima_colour, 20) : color.new(sarima_colour_1, 20)
+            transition_style := use_arima ? line.style_dashed : line.style_dotted
+            array.set(forecast_lines, 0, line.new(x1=time, y1=src, x2=transition_time, y2=transition_price, xloc=xloc.bar_time, color=transition_color, width=2, style=transition_style))
+            color second_transition_color = use_arima ? color.new(arima_colour, 15) : color.new(sarima_colour_2, 15)
+            array.set(forecast_lines, 1, line.new(x1=transition_time, y1=transition_price, x2=array.get(forecast_times, 0), y2=array.get(forecast_prices, 0), xloc=xloc.bar_time, color=second_transition_color, width=2, style=transition_style))
+        
+        // Plot each forecast segment with enhanced styling
+        for i = 0 to forecast_length - 2
+            if i + 1 < array.size(forecast_prices) and not na(array.get(forecast_prices, i)) and not na(array.get(forecast_prices, i + 1))
+                // Declare variables with explicit types
+                color line_color = na
+                int line_width = 1
+                line_style = line.style_solid
+                
+                // Set different styles based on model type
+                if use_arima
+                    // ARIMA styling (remember to give option to change colour)
+                    line_style := i % 3 == 0 ? line.style_solid : line.style_dashed
+                    line_width := i < 3 ? 2 : 1
+                    line_color := color.new(arima_colour, 0)
+                else
+                    // SARIMA styling: Keep the same enhanced seasonal styling
+                    bool is_seasonal = (i % s_period_actual == 0) or ((i + 1) % s_period_actual == 0)
+                    line_style := line.style_solid
+                    line_width := 2
+                    
+                    // Keep the colour gradient fo SARIMA
+                    line_color := is_seasonal ? color.new(sarima_colour_1, 0) : color.new(color.from_gradient(i, 0, forecast_length, color.new(sarima_colour_2, 0), color.new(sarima_colour_2, 0)), 0)
+                
+                // Draw segment
+                array.set(forecast_lines, i + 2, line.new(x1=array.get(forecast_times, i), y1=array.get(forecast_prices, i), x2=array.get(forecast_times, i + 1), y2=array.get(forecast_prices, i + 1), xloc=xloc.bar_time, color=line_color, width=line_width, style=line_style))
+        
+        // Add forecast label
+        var label forecast_label = na
+        if array.size(forecast_prices) > 0
+            last_fcast = array.get(forecast_prices, array.size(forecast_prices) - 1)
+            
+            streak_description = ""
+            if math.abs(direction_counter) == 1
+                streak_description := "New Signal"
+            else
+                streak_count = math.abs(direction_counter)
+                streak_description := str.tostring(streak_count) + " Bar " + (direction_counter > 0 ? "Bullish" : "Bearish") + " Streak"
+            
+            model_type = use_arima ? "ARIMA" : "SARIMA"
+            label_text = model_type + "(" + str.tostring(p_length) + "," + str.tostring(d_diff) + "," + str.tostring(q_length) + ")"
+            if not use_arima
+                label_text := label_text + "(" + str.tostring(P_length) + "," + str.tostring(D_diff) + "," + str.tostring(Q_length) + ")" + str.tostring(s_period)
+            
+            // Add counter and error metrics to text
+            label_text := label_text + "\nCounter: " + str.tostring(direction_counter)
+            
+            // Format error metrics with 2 decimal places
+            rmse_str = str.tostring(rmse_sma, "#.##")
+            mape_str = str.tostring(mape_sma, "#.##")
+            label_text := label_text + "\nRMSE%: " + rmse_str + "% | MAPE: " + mape_str + "%"
+            
+            // Add number of comparisons used for error metrics
+            label_text := label_text 
+            
+            // Set label position 
+            label_x_pos = array.get(forecast_times, array.size(forecast_times) - 1) + (5 * bar_width)
+            
+            // Background
+            forecast_label := label.new(x=label_x_pos, y=last_fcast, text=label_text, xloc=xloc.bar_time, yloc=yloc.price, color=color.new(#121828, 50), textcolor=color.white, style=label.style_label_center, size=size.normal)
+
+        // Seasonal markers
+        if not use_arima  
+            var label[] seasonal_markers = array.new_label(math.ceil(forecast_length / s_period_actual), na)
+            for i = 0 to math.ceil(forecast_length / s_period_actual) - 1
+                idx = i * s_period_actual
+                if idx < array.size(forecast_prices)
+                    seasonal_price = array.get(forecast_prices, idx)
+                    seasonal_time = array.get(forecast_times, idx)
+                    
+                    // Create seasonal marker - condensed to one line
+                    array.set(seasonal_markers, i, label.new(x=seasonal_time, y=seasonal_price, text="S", xloc=xloc.bar_time, yloc=yloc.price, color=color.new(#1aa0b1, 60), textcolor=color.white, style=label.style_circle, size=size.tiny))
+                    array.set(seasonal_markers, i, label.new(x=seasonal_time, y=seasonal_price, text="", xloc=xloc.bar_time, yloc=yloc.price, color=color.new(sarima_colour_2, 80), textcolor=color.white, style=label.style_circle, size=size.small))
+
+// Add boolean option for historical direction coloring
+show_historic_direction = input.bool(false, "Show Historic Prediction", group = 'Additional Settings', tooltip = 'Shows the general forecast direction of previous candles')
+
+// Define colors for bullish and bearish candles with dynamic transparency based on counter value
+bullish_transparency = math.max(0, 80 - math.abs(direction_counter) * 16) 
+bearish_transparency = math.max(0, 80 - math.abs(direction_counter) * 16) 
+
+bullish_color = color.new(color.rgb(0, 255, 187), bullish_transparency)
+bearish_color = color.new(#FF5252, bearish_transparency)
+
+// Color the candles based on the direction_counter only if show_historic_direction is enabled
+barcolor(show_historic_direction and (direction_counter != 0) ? (direction_counter > 0 ? bullish_color : bearish_color) : na)

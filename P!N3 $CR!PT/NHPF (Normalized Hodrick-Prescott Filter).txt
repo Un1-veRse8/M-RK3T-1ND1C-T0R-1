@@ -1,0 +1,31 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// © dealerof
+
+//@version=6
+indicator("NHPF (Normalized Hodrick-Prescott Filter)", shorttitle="NHPF", overlay=false)
+
+// 1) USER INPUTS
+int   hpPeriod   = input.int(300, "HP Filter Period (Lambda)")
+float hpMean     = input.float(-0.4, "Subjective Mean", step=0.1)
+float hpScale    = input.float(3.0,  "Subjective Scale", step=0.1)
+
+// 2) HP Filter Function
+//   This is a simplified approach from the code, 
+//   using a recursive approximation: trend[i] = alpha*price[i] + (1-alpha)*trend[i-1].
+f_hpFilter(source, lambda) =>
+    var float trend = na
+    alpha = 1.0 / (1.0 + 2.0 * lambda)  // approximate filter coefficient
+    trend := na(trend[1]) ? ta.sma(source, 100) : (alpha * source + (1.0 - alpha) * trend[1])
+    trend
+
+// 3) Apply the Filter
+float hpTrend = f_hpFilter(close, hpPeriod)
+
+// 4) Normalization
+//   The original code does: NHPF = (((-1 * hp_filter(close, lambda)) / close )+ 1) * hpScale + hpMean
+float rawNhp = ((-1.0 * hpTrend) / close) + 1.0
+float nhpf   = (rawNhp * hpScale) + hpMean
+
+// 5) Plot
+plot(nhpf, color=color.green, linewidth=2, title="NHPF (Norm)")
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)

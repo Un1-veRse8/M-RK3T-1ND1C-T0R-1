@@ -1,0 +1,270 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// ©bitwardex
+
+//@version=6
+indicator(title = "Machine Learning | Adaptive Trend Signals [Bitwardex]", overlay=true, max_labels_count=500)
+
+// Input parameters for indicator settings
+atrLength = input.int(14, 'ATR Length', group='Adaptive ML SmartTrend Settings')
+commonPeriod = input.int(21, 'Period', group='Adaptive ML SmartTrend Settings')
+baseFactor = input.float(2, 'Base SmartTrend Factor', group='Adaptive ML SmartTrend Settings')
+smoothingLength = input.int(10, 'SmartTrend Smoothing Length', minval=1, group='Adaptive ML SmartTrend Settings')
+showSignals = input.bool(true, 'Show Buy/Sell Signals?', group='Appearance')
+bullishColor = input.color(#68b2fc, 'Bullish Color', group='Appearance')
+bearishColor = input.color(#ff3d3d, 'Bearish Color', group='Appearance')
+show_backtest = input.bool(true, title = "Show Backtest Table", inline = "btt", group = "Appearance")
+table_size = input.string("normal", title = "", options = ["tiny", "small", "normal", "large", "huge"], inline = "btt", group = "Appearance")
+
+// Applies Gaussian smoothing to the input data
+gaussianSmooth(source, length) =>
+    var float[] weights = array.new_float(length)
+    sigma = length / 6.0
+    totalWeight = 0.0
+    // Calculate Gaussian weights
+    for i = 0 to length - 1
+        weight = math.exp(-math.pow(i, 2) / (2 * math.pow(sigma, 2)))
+        array.set(weights, i, weight)
+        totalWeight := totalWeight + weight
+    smoothedValue = 0.0
+    // Apply weights to source data
+    for i = 0 to length - 1
+        smoothedValue := smoothedValue + source[i] * array.get(weights, i)
+    smoothedValue / totalWeight
+
+// Adjusts factor based on volatility cluster
+getDynamicFactor(cluster, baseFactor) =>
+    switch cluster
+        0 => baseFactor * 0.8  // High volatility: tighter factor
+        1 => baseFactor        // Medium volatility: base factor
+        2 => baseFactor * 1.2  // Low volatility: wider factor
+        => baseFactor
+
+// Checks if value is close to zero within epsilon
+isZero(val, eps) => math.abs(val) <= eps
+
+// Adds two numbers with precision handling
+sumNumbers(fst, snd) =>
+    eps = 1e-10
+    res = fst + snd
+    if isZero(res, eps)
+        res := 0
+    else
+        if not isZero(res, 1e-4)
+            res := res
+        else
+            15
+
+// Calculates standard deviation
+pineStdev(src, length) =>
+    avg = ta.sma(src, length)
+    sumOfSquaredDeviations = 0.0
+    for i = 0 to length - 1
+        sum = sumNumbers(src[i], -avg)
+        sumOfSquaredDeviations := sumOfSquaredDeviations + sum * sum
+    math.sqrt(sumOfSquaredDeviations / length)
+
+// Calculates ATR for volatility
+atrValue = ta.atr(14)
+
+// Adjusts standard deviation based on ATR
+dynamicStdev(atr) => 
+    avgAtr = ta.sma(atr, 50)
+    avgAtr2 = avgAtr * 1.25
+    avgAtr3 = avgAtr * 1.5
+    avgAtr4 = avgAtr * 2
+    stdevDynamicMult = atr > avgAtr and atr < avgAtr2 ? 1.1 :
+                       atr >= avgAtr2 and atr < avgAtr3 ? 1.2 : 
+                       atr >= avgAtr3 and atr < avgAtr4 ? 1.3 :
+                       atr > avgAtr4 ? 1.4 : 1
+    pineStdev(close, commonPeriod) * stdevDynamicMult
+
+// Calculates Directional Movement
+dirmov(len) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    trueRange = ta.rma(ta.tr, len)
+    plus = fixnan(100 * ta.rma(plusDM, len) / trueRange)
+    minus = fixnan(100 * ta.rma(minusDM, len) / trueRange)
+    [plus, minus]
+
+// Calculates ADX indicator
+adx(diLen, adxLen) =>
+    [plus, minus] = dirmov(diLen)
+    sum = plus + minus
+    adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxLen)
+
+// Core SmartTrend calculation
+pineSmartTrend(factor, atr, smoothingLength) =>
+    upperBand = low - dynamicStdev(atr) * factor
+    lowerBand = high + dynamicStdev(atr) * factor
+    prevLowerBand = nz(lowerBand[1])
+    prevUpperBand = nz(upperBand[1])
+    var float smartTrend = na
+    rsi = gaussianSmooth(ta.rsi(ohlc4, commonPeriod), 14)
+    sig = adx(14, 14)
+    condition = rsi > 50 and sig > gaussianSmooth(sig, commonPeriod) and sig > 15
+    condition2 = rsi < 50 and sig > gaussianSmooth(sig, commonPeriod) and sig > 15
+    smartTrend := condition ? (upperBand < nz(smartTrend[1]) ? nz(smartTrend[1]) : upperBand) :
+                  condition2 ? (lowerBand > nz(smartTrend[1]) ? nz(smartTrend[1]) : lowerBand) : smartTrend[1]
+    gaussianSmooth(smartTrend, smoothingLength)
+
+// Volatility clustering using K-Means
+trainingDataPeriod = 100
+volatility = ta.atr(atrLength)
+upper = ta.highest(volatility, trainingDataPeriod)
+lower = ta.lowest(volatility, trainingDataPeriod)
+highVolatility = lower + (upper - lower) * 0.75
+mediumVolatility = lower + (upper - lower) * 0.5
+lowVolatility = lower + (upper - lower) * 0.25
+
+var int iterations = 0
+var int sizeA = 0
+var int sizeB = 0
+var int sizeC = 0
+highVolatilityArray = array.new_float(0)
+mediumVolatilityArray = array.new_float(0)
+lowVolatilityArray = array.new_float(0)
+aMean = array.new_float(1, highVolatility)
+bMean = array.new_float(1, mediumVolatility)
+cMean = array.new_float(1, lowVolatility)
+
+// K-Means clustering loop
+if nz(volatility) > 0 and bar_index >= trainingDataPeriod - 1
+    while (aMean.size() == 1 ? true : aMean.first() != aMean.get(1)) or 
+          (bMean.size() == 1 ? true : bMean.first() != bMean.get(1)) or 
+          (cMean.size() == 1 ? true : cMean.first() != cMean.get(1))
+        highVolatilityArray.clear()
+        mediumVolatilityArray.clear()
+        lowVolatilityArray.clear()
+        for i = trainingDataPeriod - 1 to 0 by 1
+            if math.abs(volatility[i] - aMean.first()) < math.abs(volatility[i] - bMean.first()) and 
+               math.abs(volatility[i] - aMean.first()) < math.abs(volatility[i] - cMean.first())
+                highVolatilityArray.unshift(volatility[i])
+            if math.abs(volatility[i] - bMean.first()) < math.abs(volatility[i] - aMean.first()) and 
+               math.abs(volatility[i] - bMean.first()) < math.abs(volatility[i] - cMean.first())
+                mediumVolatilityArray.unshift(volatility[i])
+            if math.abs(volatility[i] - cMean.first()) < math.abs(volatility[i] - aMean.first()) and 
+               math.abs(volatility[i] - cMean.first()) < math.abs(volatility[i] - bMean.first())
+                lowVolatilityArray.unshift(volatility[i])
+        aMean.unshift(highVolatilityArray.avg())
+        bMean.unshift(mediumVolatilityArray.avg())
+        cMean.unshift(lowVolatilityArray.avg())
+        sizeA := highVolatilityArray.size()
+        sizeB := mediumVolatilityArray.size()
+        sizeC := lowVolatilityArray.size()
+        iterations := iterations + 1
+
+highVolatilityNew = aMean.first()
+mediumVolatilityNew = bMean.first()
+lowVolatilityNew = cMean.first()
+volatilityDistA = math.abs(volatility - highVolatilityNew)
+volatilityDistB = math.abs(volatility - mediumVolatilityNew)
+volatilityDistC = math.abs(volatility - lowVolatilityNew)
+
+distances = array.new_float(0)
+centroids = array.new_float(0)
+distances.push(volatilityDistA)
+distances.push(volatilityDistB)
+distances.push(volatilityDistC)
+centroids.push(highVolatilityNew)
+centroids.push(mediumVolatilityNew)
+centroids.push(lowVolatilityNew)
+
+// Assign cluster based on minimum distance
+cluster = distances.indexof(distances.min()) // 0 for high, 1 for medium, 2 for low
+assignedCentroid = cluster == -1 ? na : centroids.get(cluster)
+
+generate_signals(baseFactor) =>
+    // Apply dynamic factor and calculate SmartTrend
+    dynamicFactor = getDynamicFactor(cluster, baseFactor)
+    smartTrend = pineSmartTrend(dynamicFactor, assignedCentroid, smoothingLength)
+    smartTrend2 = pineSmartTrend(dynamicFactor * 1.382, assignedCentroid, smoothingLength)
+    smartTrend3 = math.avg(smartTrend, smartTrend2)
+
+    // Determine trend direction and signals
+    var float direction = 0
+    buySignal = ta.crossover(smartTrend, smartTrend2) and close > smartTrend
+    sellSignal = ta.crossunder(smartTrend, smartTrend2) and close < smartTrend
+
+    if buySignal and direction != 1
+        direction := 1
+    if sellSignal and direction != -1
+        direction := -1
+
+    [buySignal, sellSignal, direction, smartTrend, smartTrend2, smartTrend3]
+
+[buySignal, sellSignal, direction, smartTrend, smartTrend2, smartTrend3] = generate_signals(baseFactor)
+
+long_signal = buySignal and direction[2] <= 0
+short_signal = sellSignal and direction[2] >= 0
+
+get_backtest(long_sig, short_sig, smartTrend3) =>
+    // Backtesting variables
+    var float entry_price = na
+    var bool in_long = false
+    var bool in_short = false
+    var int total_trades = 0
+    var int profitable_trades = 0
+
+    // Backtesting logic
+    if long_sig and not in_long
+        if in_short
+            // Close short
+            total_trades := total_trades + 1
+            if smartTrend3 < entry_price
+                profitable_trades := profitable_trades + 1
+            in_short := false
+        // Open long
+        entry_price := smartTrend3
+        in_long := true
+
+    if short_sig and not in_short
+        if in_long
+            // Close long
+            total_trades := total_trades + 1
+            if smartTrend3 > entry_price
+                profitable_trades := profitable_trades + 1
+            in_long := false
+        // Open short
+        entry_price := smartTrend3
+        in_short := true
+
+    // Calculate winrate
+    winrate = total_trades > 0 ? (profitable_trades / total_trades) * 100 : 0
+    [winrate, total_trades]
+
+[winrate, total_trades] = get_backtest(long_signal, short_signal, smartTrend3)
+
+// Display winrate in a table
+var table t = table.new(position.top_right, 2, 3, border_width=0)
+winrate_color = winrate < 50 ? #cd5c5c : #889b73
+if barstate.islast
+    table.cell(t, 0, 0, "⚙️Backtest", bgcolor=#2E3033, text_color=#b4b4b4, text_formatting = text.format_bold, text_halign = text.align_left, text_size = table_size)
+    table.cell(t, 1, 0, "", bgcolor=#2E3033, text_color=#b4b4b4, text_size = table_size)
+    table.cell(t, 0, 1, "📊Winrate", bgcolor=#1A1B1E, text_color=color.white, text_formatting = text.format_bold, text_halign = text.align_left, text_size = table_size)
+    table.cell(t, 1, 1, str.tostring(winrate, "#.##") + "%", bgcolor=#1A1B1E, text_color=winrate_color, text_size = table_size)
+    table.cell(t, 0, 2, "📋Trades", bgcolor=#1A1B1E, text_color=color.white, text_formatting = text.format_bold, text_halign = text.align_left, text_size = table_size)
+    table.cell(t, 1, 2, str.tostring(total_trades), bgcolor=#1A1B1E, text_color=#b4b4b4, text_size = table_size)
+
+// Plotting the SmartTrend lines
+trendColor = color.from_gradient(cluster + 1, 1, 3, 
+     color.new(direction < 0 ? bearishColor : bullishColor, 30), 
+     color.new(direction < 0 ? bearishColor : bullishColor, 90))
+trendColor2 = direction > 0 ? color.new(bullishColor, 70) : color.new(bearishColor, 70)
+upTrend = plot(smartTrend3, title = "Smart Trend 1", color=trendColor, style=plot.style_linebr, linewidth=3)
+upTrend2 = plot(smartTrend3, title = "Smart Trend 2", color=trendColor2, style=plot.style_linebr, linewidth=3)
+
+// Plot buy/sell signals
+plotshape(showSignals and long_signal ? smartTrend3 : na, "Bullish Trend", 
+     shape.circle, location.absolute, bullishColor, text="🐮", textcolor=bullishColor, size=size.tiny)
+plotshape(showSignals and short_signal ? smartTrend3 : na, "Bearish Trend", 
+     shape.circle, location.absolute, bearishColor, text="🐻", textcolor=bearishColor, size=size.tiny)
+
+// Alert conditions for trading signals and volatility changes
+alertcondition(long_signal and barstate.isconfirmed, "Bullish Trend Shift")
+alertcondition(short_signal and barstate.isconfirmed, "Bearish Trend Shift")
+alertcondition(cluster == 0 and cluster[1] != 0 and barstate.isconfirmed, "High Volatility")
+alertcondition(cluster == 1 and cluster[1] != 1 and barstate.isconfirmed, "Medium Volatility")
+alertcondition(cluster == 2 and cluster[1] != 2 and barstate.isconfirmed, "Low Volatility")

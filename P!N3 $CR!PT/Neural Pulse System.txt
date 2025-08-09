@@ -1,0 +1,127 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AlphaExtract
+
+//@version=6
+indicator("Neural Pulse System [Alpha Extract]", overlay=true)
+
+// === INPUT VARIABLES ===
+length             = input.int(300, title="Rolling Window")  
+threshold_long     = input.float(-0.3, title="Probability Threshold (LONG)", step = 0.01)
+threshold_short    = input.float(-0.6, title="Probability Threshold (SHORT)", step = 0.01)
+plot_pulse         = input.bool(true, "Neural Pulse")
+
+// ATR Smoothing: 
+smooth_length      = input.int(7, title="Smoothing Length", group="ATR Smoothing")
+atr_length         = input.int(14, title="ATR Length", group="ATR Smoothing")
+atr_multiplier     = input.float(2, title="ATR Multiplier", group="ATR Smoothing")
+band_smooth_length = input.int(5, title="ATR Band Smoothing Length", group="ATR Smoothing")
+
+//EMA: 
+ema_length         = input.int(20, title="EMA Length", group = "EMA Component")
+
+// RSI: 
+rsi_length         = input.int(14, title="RSI Length", group = "RSI Component")
+
+// SuperTrend: 
+period_st          = input.int(25, "Supertrend Period", minval=1, group = "SuperTrend Component")
+factor_st          = input.float(6.5, "Supertrend Factor", minval=0.01, step=0.01, group = "SuperTrend Component")
+
+// === FEATURES ===
+ema_value = ta.ema(close, ema_length)
+rsi_value = ta.rsi(close, rsi_length)
+atr_value = ta.atr(atr_length)
+[supertrend_val, direction] = ta.supertrend(factor_st, period_st)
+
+
+// Normalization function:
+normalize(src, len) =>
+    (src - ta.sma(src, len)) / ta.stdev(src, len)
+
+// Scale features
+ema_scaled = normalize(ema_value, length)
+rsi_scaled = normalize(rsi_value, length)
+supertrend_norm = normalize(supertrend_val, length)
+
+// Convert price change into binary outcome (1 if price is up, 0 if down)
+price_change = close > ta.sma(close, 2) ? 1 : 0
+
+// === FUNCTION 1: Compute Means ===
+compute_means(src, len) =>
+    ta.sma(src, len)
+
+// Compute rolling means
+mean_X1 = compute_means(ema_scaled, length)
+mean_X2 = compute_means(rsi_scaled, length)
+mean_X3 = compute_means(supertrend_norm, length)
+mean_Y  = compute_means(price_change, length)
+
+// === FUNCTION 2: Compute Coefficients Using OLS (Scaled 100x) ===
+compute_coefficients(X, Y, mean_X, mean_Y, len) =>
+    numerator   = ta.sma((X - mean_X) * (Y - mean_Y), len)
+    denominator = ta.sma((X - mean_X) * (X - mean_X), len)
+    coeff       = (numerator / denominator) * 100  // Scale 100x
+    math.max(coeff, 0.5)  // Ensure at least 0.5
+
+// Compute regression coefficients
+b1 = compute_coefficients(rsi_scaled, price_change, mean_X2, mean_Y, length)
+b2 = compute_coefficients(supertrend_norm, price_change, mean_X3, mean_Y, length)
+b0 = mean_Y - (b1 * mean_X2) - (b2 * mean_X3)
+
+// === FUNCTION 3: Compute Logistic Regression ===
+logistic_function(X1, X2, X3, b0, b1, b2) =>
+    logit = b0 + (b1 * X2) + (b2 * X3)
+    1 / (1 + math.exp(-logit))
+
+// Compute probability and convert it to a scale from -1 to 1
+probability = logistic_function(ema_scaled, rsi_scaled, supertrend_norm, b0, b1, b2) * 2 - 1
+
+// === Apply Smoothing ===
+smooth_prob = ta.ema(probability, smooth_length)
+
+// === ATR-Based Band Calculation ===
+band_height = atr_value * atr_multiplier * math.abs(smooth_prob)
+upper_band  = close + (smooth_prob > 0 ? band_height : 0)
+lower_band  = close - (smooth_prob < 0 ? band_height : 0)
+
+// === SMOOTH ATR BANDS ===
+smoothed_upper_band = ta.ema(upper_band, band_smooth_length)
+smoothed_lower_band = ta.ema(lower_band, band_smooth_length)
+
+// === COLOR GRADIENT (From Red to Green) ===
+color_gradient = color.rgb(255 * (1 - (smooth_prob + 1) / 2), 255 * ((smooth_prob + 1) / 2), 0)
+
+// === PLOT SMOOTHED PROBABILITY LINE ===
+plot(plot_pulse ? smooth_prob : na, title="Smoothed Probability", color=color_gradient, linewidth=2, style=plot.style_line)
+
+// === PLOT SMOOTHED ATR BANDS ===
+plot(smoothed_upper_band == close ? na : smoothed_upper_band, title="Upper ATR Band", color=color_gradient, linewidth=2, style=plot.style_line)
+plot(smoothed_lower_band == close ? na : smoothed_lower_band, title="Lower ATR Band", color=color_gradient, linewidth=2, style=plot.style_line)
+
+// === TABLE SETTINGS ===
+var table coeff_table = table.new(position.top_right, 3, 6, bgcolor = color.rgb(0, 0, 0, 80))
+
+// Table headers
+table.cell(coeff_table, 0, 0, "Coefficient", text_color=color.white, bgcolor=color.rgb(0, 0, 0, 100))
+table.cell(coeff_table, 1, 0, "Value",       text_color=color.white, bgcolor=color.rgb(0, 0, 0, 100))
+table.cell(coeff_table, 2, 0, "Description", text_color=color.white, bgcolor=color.rgb(0, 0, 0, 100))
+    
+// Intercept (b₀)
+table.cell(coeff_table, 0, 1, "b₀", text_color=color.white)
+table.cell(coeff_table, 1, 1, str.tostring(b0, "#.##"), text_color=color.white)
+table.cell(coeff_table, 2, 1, "Intercept", text_color=color.white)
+    
+// RSI coefficient (b₁)
+table.cell(coeff_table, 0, 2, "b₁", text_color=color.white)
+table.cell(coeff_table, 1, 2, str.tostring(b1, "#.##"), text_color=color.white)
+table.cell(coeff_table, 2, 2, "RSI Coeff", text_color=color.white)
+    
+// Supertrend coefficient (b₂)
+table.cell(coeff_table, 0, 3, "b₂", text_color=color.white)
+table.cell(coeff_table, 1, 3, str.tostring(b2, "#.##"), text_color=color.white)
+table.cell(coeff_table, 2, 3, "SuperTrend Coeff", text_color=color.white)
+    
+// Trend state based on the smoothed probability
+table.cell(coeff_table, 0, 5, "🟢Trend🔴", text_color=color.white)
+table.cell(coeff_table, 1, 5, str.tostring(smooth_prob, "#.##"), text_color = smooth_prob > 0 ? color.green : color.red)
+table.cell(coeff_table, 2, 5, smooth_prob > 0 ? "BULLISH" : "BEARISH", text_color = smooth_prob > 0 ? color.green : color.red)
+

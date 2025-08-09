@@ -1,0 +1,192 @@
+
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+//@version=6
+indicator("MACD with Holt–Winters Smoothing [AIBitcoinTrend]", overlay=false, max_polylines_count = 100, precision = 1)
+
+// User inputs
+fastLength   = input.int(12, title="Fast Length" , minval=1, group="", inline="")
+slowLength   = input.int(26, title="Slow Length" , minval=1, group="", inline="")
+alpha        = input.float(0.2, title="Alpha", step=0.01 , minval=0.01, group="", inline="")
+beta         = input.float(0.1, title="Beta", step=0.01 , minval=0.01, group="", inline="")
+
+sig   = input.bool(true, title="Crosses Signals", group="Bullish/Bearish Signals", inline="")
+trend = input.bool(true, title="Filter Signals based on the Trend Direction", group="Bullish/Bearish Signals", inline="")
+
+
+trEn = input.bool(true, title='Crosses Trailing Stop', group="Trailing Stop", tooltip='Enable or disable the breakout trailing stop feature. When enabled, trailing stops are calculated based on ATR.')
+m = input.float(3, minval=0.1, step=0.1, title='Trailing Multiplier', group="Trailing Stop", tooltip='ATR multiplier for calculating the trailing stop. Higher values result in wider stops, reducing the chance of premature exit.')
+lw = input.int(1, minval=1, title='Trailing Line Width', group="Trailing Stop", tooltip='Width of the trailing stop line displayed on the chart.')
+posClr = input.color(color.rgb(119, 255, 0), title='', group='Trailing Stop', inline='Style')
+negClr = input.color(color.rgb(255, 0, 13), title='', group='Trailing Stop', inline='Style')
+
+calculateDivergence = input.bool(false, title="Real-Time Divergence", group="Real-Time Divergence")
+lookbackLeft  = input.int(20, minval=1, title="Lookback", group="Real-Time Divergence")
+bearColor  = input.color(color.red,   "Bearish Color", group="Real-Time Divergence")
+bullColor  = input.color(color.green, "Bullish Color", group="Real-Time Divergence")
+textColor  = input.color(color.white, "Text Color", group="Real-Time Divergence")
+noneColor  = color.new(color.white, 100)
+
+// Standard MACD calculation
+macdVal = ta.ema(close, fastLength) - ta.ema(close, slowLength)
+
+// Declare Holt–Winters level (L) and trend (T) as `var` so they persist across bars
+var float L = na
+var float T = na
+
+// On the very first bar of the chart, initialize L and T
+if barstate.isfirst
+    L := macdVal
+    T := 0.0
+else
+    // Update L and T using Holt’s linear trend equations
+    L := alpha * macdVal + (1.0 - alpha) * (nz(L[1]) + nz(T[1]))
+    T := beta  * (L - nz(L[1])) + (1.0 - beta) * nz(T[1])
+
+// Compute Holt–Winters signal and histogram
+hwSignal   = L + T
+histogram  = macdVal - hwSignal
+
+// Plot lines
+plot(macdVal,    color=#2962FF,   title="MACD Line")
+plot(hwSignal,   color=#FF6D00, title="HW Signal")
+plot(histogram, title="Histogram", style = plot.style_columns, color = (histogram >= 0 ? (histogram[1] < histogram ? #26A69A : #B2DFDB) : (histogram[1] < histogram ? #FFCDD2 : #FF5252)))
+
+// Divergence 
+var bool plFound = false
+var bool phFound = false
+var bool bullCond = false
+var bool bearCond = false
+
+if calculateDivergence
+    plFound := not na(ta.pivotlow(macdVal, lookbackLeft, 0))
+    rsiHL = macdVal > ta.valuewhen(plFound, macdVal, 1) 
+    priceLL = low < ta.valuewhen(plFound, low, 1)
+    bullCond := priceLL and rsiHL and plFound
+    phFound := not na(ta.pivothigh(macdVal, lookbackLeft, 0))
+    rsiLH = macdVal < ta.valuewhen(phFound, macdVal, 1)
+    priceHH = high > ta.valuewhen(phFound, high, 1)
+    bearCond := priceHH and rsiLH and phFound
+
+plot(plFound ? macdVal : na, title="Bullish Pivot", linewidth=2, color=(bullCond ? bullColor : noneColor))
+plotshape(bullCond ? macdVal : na, title="Bullish Divergence Label", text=" Bull ", style=shape.labelup, location=location.absolute, color=bullColor, textcolor=textColor)
+plot(phFound ? macdVal : na, title="Bearish Pivot", linewidth=2, color=(bearCond ? bearColor : noneColor))
+plotshape(bearCond ? macdVal : na, title="Bearish Divergence Label", text=" Bear ", style=shape.labeldown, location=location.absolute, color=bearColor, textcolor=textColor)
+
+alertcondition(bullCond, title="Real-time Bullish Divergence", message="New Real-time Bullish Divergence detected.")
+alertcondition(bearCond, title="Real-time Bearish Divergence", message="New Real-time Bearish Divergence detected.")
+
+// Trailing Stop
+atr = ta.atr(100)
+// Functions for Trailing Stop Updates 
+f_updateBull(bullTrig, bullAct, preStop, ts, pts, cross, col, lw) =>
+    var float newTS = ts
+    var bool newActive = bullAct
+    var bool actPlot = false
+    if bullTrig or bullAct
+        if bullTrig
+            // New trigger: add starting point and set stop value.
+            array.unshift(pts, chart.point.from_index(bar_index, preStop))
+            newTS := preStop
+            newActive := true
+        else
+            // Update stop: use the maximum of the new preStop or the current stop.
+            array.unshift(pts, chart.point.from_index(bar_index, math.max(preStop, newTS)))
+            newTS := math.max(preStop, newTS)
+            actPlot := true
+        // Exit condition: if the price crosses below the stop, reset state.
+        if cross
+            newActive := false
+            newTS := float(na)
+            polyline.new(pts, line_color = col, line_width = lw, force_overlay = true)
+            array.clear(pts)
+    [newTS, newActive, actPlot]
+
+// f_updateBear: Updates bearish trailing stop state.
+f_updateBear(bearTrig, bearAct, preStop, ts, pts, cross, col, lw) =>
+    var float newTS = ts
+    var bool newActive = bearAct
+    var bool actPlot = false
+    if bearTrig or bearAct
+        if bearTrig
+            // New trigger: add starting point and set stop value.
+            array.unshift(pts, chart.point.from_index(bar_index, preStop))
+            newTS := preStop
+            newActive := true
+        else
+            // Update stop: use the minimum of the new preStop or the current stop.
+            array.unshift(pts, chart.point.from_index(bar_index, math.min(preStop, newTS)))
+            newTS := math.min(preStop, newTS)
+            actPlot := true
+        // Exit condition: if the price crosses above the stop, reset state.
+        if cross
+            newActive := false
+            newTS := float(na)
+            polyline.new(pts, line_color = col, line_width = lw, force_overlay = true)
+            array.clear(pts)
+    [newTS, newActive, actPlot]
+
+// Global Variables and Pre-Calculations
+// Initialize arrays and state variables for bullish and bearish trailing stops.
+var ptsBull = array.new<chart.point>()    
+var ptsBear = array.new<chart.point>()    
+var polyline pBull = na                   
+var polyline pBear = na                   
+var bullPos = false                       
+var bearPos = false                      
+var tsBull = float(na)                    
+var tsBear = float(na)                    
+
+bool bullAct = false
+bool bearAct = false                    
+      
+// Calculate MACD-based crossover conditions for signal generation.
+sigalUp = ta.rising(hwSignal,1)
+signlDn = ta.falling(hwSignal,1)
+bool isB = ta.crossover(macdVal, hwSignal) and sigalUp
+bool isBr = ta.crossunder(macdVal, hwSignal) and signlDn
+
+if trend 
+    isB := ta.crossover(macdVal, hwSignal) and sigalUp and macdVal  > 0
+    isBr := ta.crossunder(macdVal, hwSignal) and signlDn and macdVal < 0
+
+// Pre-calculate initial stop levels using ATR and multiplier.
+float preBullStop = low - atr * m      
+float preBearStop = high + atr * m          
+
+// Determine if the price has crossed the trailing stop levels.
+bool crossBull = ta.crossunder(close, tsBull) 
+bool crossBear = ta.crossover(close, tsBear)  
+
+// Define trailing stop triggers based on RSI conditions and trailing stop enable flag.
+bool bullT = isB and not isB[1] and trEn    
+bool bearT = isBr and not isBr[1] and trEn   
+
+// Main Execution Using the Functions 
+// Bullish Trailing Stop Update.
+[newTSBull, newBullPos, newBullAct] = f_updateBull(bullT, bullPos, preBullStop, tsBull, ptsBull, crossBull, posClr, lw)
+tsBull := newTSBull      
+bullPos := newBullPos     
+bullAct := newBullAct     
+pBull.delete()          
+if ptsBull.size() > 0
+    pBull := polyline.new(ptsBull, false, false, line_color = posClr, line_width = lw, force_overlay = true)
+
+// Bearish Trailing Stop Update.
+[newTSBear, newBearPos, newBearAct] = f_updateBear(bearT, bearPos, preBearStop, tsBear, ptsBear, crossBear, negClr, lw)
+tsBear := newTSBear       
+bearPos := newBearPos    
+bearAct := newBearAct     
+pBear.delete()           
+if ptsBear.size() > 0
+    pBear := polyline.new(ptsBear, false, false, line_color = negClr, line_width = lw, force_overlay = true)
+
+// Plotshape
+plotshape(bullT and sig ? low - atr * m : na, location = location.absolute, style = shape.circle, color = posClr, size = size.tiny, title = 'Bullish Trailing Starts', force_overlay = true)
+plotshape(bullT and newBullPos[1] == false  and sig? low - atr * m : na, location = location.absolute, style = shape.circle, color = color.new(posClr, 50), size = size.small, title = 'Bullish Trailing Starts', force_overlay = true)
+plotshape(bearT and sig? high + atr * m : na, location = location.absolute, style = shape.circle, color = negClr, size = size.tiny, title = 'Bearish Trailing Starts', force_overlay = true)
+plotshape(bearT and newBearPos[1] == false and sig? high + atr * m : na, location = location.absolute, style = shape.circle, color = color.new(negClr, 50), size = size.small, title = 'Bearish Trailing Starts', force_overlay = true)
+
+plotshape(bullT and sig? macdVal : na, location = location.absolute, style = shape.circle, color = posClr, size = size.tiny, title = 'Bullish Trailing Starts')
+plotshape(bullT and newBullPos[1] == false and sig? macdVal : na, location = location.absolute, style = shape.circle, color = color.new(posClr, 50), size = size.small, title = 'Bullish Trailing Starts')
+plotshape(bearT and sig? macdVal : na, location = location.absolute, style = shape.circle, color = negClr, size = size.tiny, title = 'Bearish Trailing Starts')
+plotshape(bearT and newBearPos[1] == false and sig? macdVal : na, location = location.absolute, style = shape.circle, color = color.new(negClr, 50), size = size.small, title = 'Bearish Trailing Starts')

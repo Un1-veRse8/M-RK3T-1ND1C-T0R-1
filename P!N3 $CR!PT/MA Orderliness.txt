@@ -1,0 +1,83 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © mertenes3
+
+//@version=5
+indicator("MA Orderliness", overlay=false)
+
+// --------------------------
+// 1. Define Parameters
+// --------------------------
+
+// Number of MAs
+num_mas = input(100,'Number of MAs')
+
+// MA length range
+min_length = input(5,'Min MA Length')
+max_length = input(250,'Max MA Length')
+
+// Weighting function: inversely proportional to the distance between MA indices
+// Closer MAs have higher weights
+get_weight(i, j) =>
+    distance = math.abs(j - i)
+    distance > 0 ? 1.0 / distance : 1.0
+
+// --------------------------
+// 2. Calculate the Oscillator
+// --------------------------
+
+// Create an array of MA lengths with finer increments
+lengths = array.new_int(num_mas)
+for i = 0 to num_mas - 1
+    // Linear spacing; you can adjust to logarithmic if preferred
+    length = min_length + math.floor(i * ((max_length - min_length) / (num_mas - 1)))
+    array.set(lengths, i, length)
+
+// Calculate all MAs and store in an array
+mas = array.new_float(num_mas)
+for i = 0 to num_mas - 1
+    ma = ta.sma(close, array.get(lengths, i))
+    array.set(mas, i, ma)
+
+// Initialize weighted violations and total weights
+var float weighted_violations = 0.0
+var float total_weights = 0.0
+
+// Reset for each bar
+weighted_violations := 0.0
+total_weights := 0.0
+
+// Calculate weighted violations
+for i = 0 to array.size(mas) - 2
+    for j = i + 1 to array.size(mas) - 1
+        // Get MA values
+        ma_i = array.get(mas, i)
+        ma_j = array.get(mas, j)
+        
+        // Calculate weight based on distance
+        weight = get_weight(i, j)
+        total_weights += weight
+        
+        // Check for violation: expecting ma_i > ma_j for ordered MAs (assuming uptrend)
+        if ma_i < ma_j
+            weighted_violations += weight
+
+// Calculate orderliness, normalized between -1 and 1
+orderliness = 1 - (weighted_violations / total_weights) * 2
+
+// Plot the oscillator
+plot(orderliness, title="Orderliness Oscillator", color=color.blue, linewidth=2)
+hline(1, "Fully Ordered (1)", color=color.green, linestyle=hline.style_dotted)
+hline(-1, "Fully Reversed (-1)", color=color.red, linestyle=hline.style_dotted)
+
+// Calculate and plot a moving average of the orderliness for signal generation
+l = input(25,'Signal Line Length')
+e = ta.sma(orderliness, l)
+plot(e, color=color.purple)
+
+upc = ta.crossover(orderliness,e)
+downc = ta.crossunder(orderliness,e)
+if upc
+    alert('Bullish Crossover')
+if downc
+    alert('Bearish Crossover')
+
