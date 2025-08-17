@@ -1,0 +1,115 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © SurgeQuant
+
+//@version=6
+indicator("Gaussian Volatility Adjusted ")
+// =====================================================================================
+//                                  Volatility Parameters
+// =====================================================================================
+
+group_volatility = "Volatility Parameters"
+atr_Length       = input.int(24, "ATR Length", group = group_volatility, minval = 1)
+atr_Factor       = input.float(0.85, "ATR Factor", step = 0.05, group = group_volatility, minval = 0.05)
+std_Length       = input.int(27, "SD Length", group = group_volatility, minval = 1)
+sensitivity      = input.float(1.0, "Volatility Sensitivity", step = 0.1, group = group_volatility) 
+
+// =====================================================================================
+//                                  Moving Average Parameters
+// =====================================================================================
+
+group_ma   = "Moving Average Parameters"
+use_Ema    = input.bool(true,"Use Ema Confluance", group = group_ma, inline = "EMA")
+ema_Length = input.int(45, "EMA Length", group = group_ma, minval = 2, inline = "EMA")
+
+// =====================================================================================
+//                                  Gaussian Parameters
+// ===================================================================================== 
+
+group_gaussian  = "Gaussain Parameters"
+length_Gaussian = input.int(70,"Gaussian Length", group = "Gaussian Calculations", minval = 1)
+sigma_Gaussian  = input.int(12,"Sigma", group = "Gaussian Calculations", minval = 1)
+
+// =====================================================================================
+//                                  Gaussian Calculation
+// =====================================================================================
+
+gaussian_Filter(src, lenght, sigma) =>
+    var float [] weights = array.new_float(lenght)
+    total = 0.0
+    pi = math.pi
+    for i = 0 to lenght -1
+        weight = math.exp(-0.5 * math.pow((i - lenght / 2)/sigma, 2.0))/math.sqrt(sigma * 2.0 * pi)
+        weights.set(i, weight)
+        total := total + weight
+    for i = 0 to lenght -1 
+        weights.set(i, weights.get(i) / total)
+    sum = 0.0
+    for i = 0 to lenght - 1 
+        sum := sum + src[i] * weights.get(i)
+    sum
+ma = ta.ema(close ,ema_Length)
+gaussian = gaussian_Filter(ma, length_Gaussian, sigma_Gaussian)
+
+// =====================================================================================
+//                                  Volatility Adjusting 
+// =====================================================================================
+
+atr_ = ta.atr(atr_Length) * sensitivity
+sd_  = ta.stdev(close, std_Length) * sensitivity
+
+upper = gaussian + (atr_ * atr_Factor)
+lower = gaussian - (atr_ * atr_Factor)
+
+std_up   = gaussian + sd_
+std_down = gaussian - sd_
+
+sdL = close > std_up
+
+long  = close > lower
+short = close < upper
+
+//Trend and Momentum Calculations
+//TREND
+var Trend = 0.0
+if sdL
+    Trend := 1
+if short 
+    Trend := -1
+
+//MOMENTUM
+var Diff = 0.0
+if Trend == 1
+    Diff := close - upper
+if Trend == -1 
+    Diff := close - (gaussian + sd_)
+// =====================================================================================
+//                       Trend Condition and Momemtum Settings 
+// =====================================================================================
+ema = ta.ema(Diff, ema_Length)
+
+//FINAL TREND 
+var T_Ema_Included = 0.0
+if Trend == 1 and Diff > ema
+    T_Ema_Included := 1
+if Trend == -1 and Diff < ema
+    T_Ema_Included := -1
+
+var Final_Trend = 0.0
+if  use_Ema and T_Ema_Included == 1
+    Final_Trend := 1
+if use_Ema and T_Ema_Included == -1
+    Final_Trend := -1
+if Trend == 1 and not use_Ema
+    Final_Trend := 1
+if Trend == -1 and not use_Ema
+    Final_Trend := -1
+
+
+
+col = Final_Trend == 1.0 ? color.new(color.green, 0) : Final_Trend == -1.0 ? color.new(color.red, 0) : color.new(color.gray, 0)
+plot(0, "Zero Line", color = color.new(chart.fg_color, 50))
+plot(ema, color = col, linewidth = 1)
+
+
+//set Bar color
+barcolor(Final_Trend == 1.0 ? color.green : Final_Trend == -1.0 ? color.red : na)

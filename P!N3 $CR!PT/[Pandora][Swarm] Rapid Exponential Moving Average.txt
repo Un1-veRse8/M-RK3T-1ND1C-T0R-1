@@ -1,0 +1,142 @@
+// © ImmortalFreedom
+// Use and reuse of this code is governed by the terms of the Attribution-NonCommercial-ShareAlike 4.0 International License. https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.txt
+
+//@version=6
+indicator('[Pandora][Swarm] Rapid Exponential Moving Average', 'REMA', true, timeframe='')
+
+rema(series float Series,
+     simple float Period) =>
+    //≡≡≡≡≡ Rapid Exponential Moving Average ≡≡≡≡≡// @ImmortalFreedom
+    var const float SQRT17_8 = math.sqrt(17.8)
+    var const float SQRT0_5  = math.sqrt( 0.5)
+    var const float PIx2     = math.pi *  2.0
+    float filter = na
+    if Period < 2.0
+        filter := Series
+    else
+        var float omega =  PIx2 / (math.pow(SQRT0_5, Period) * SQRT17_8 + 1.0 + Period)
+        var float alpha =  math.cos(omega)
+        var float COEF0 = (math.sin(omega) + alpha - 1.0) / alpha
+        var float COEF1 =  1.0 - COEF0
+        filter := COEF0 *               Series +
+                  COEF1 * nz(filter[1], Series)
+    filter
+
+jess(series float Series,
+     simple float Period) =>
+    //≡≡≡≡≡ SuperSmoother ≡≡≡≡≡// @ImmortalFreedom
+    float filter = na
+    if Period < 2.0
+        filter := Series
+    else
+        var float omega = math.sqrt(2.0) * math.pi / Period
+        var float alpha = math.exp(-omega)
+        var float COEF2 = math.pow( alpha,   2)
+        var float COEF1 = math.cos( omega) * 2.0 * alpha
+        var float COEF0 = 1.0 - COEF1 + COEF2
+        float      SMA2 = math.avg(Series, nz(Series[1], Series))
+        filter := COEF0 *                             SMA2    +
+                  COEF1 *               nz(filter[1], Series) -
+                  COEF2 * nz(filter[2], nz(filter[1], Series))
+    filter
+
+hann(series float Series,
+     simple int   Period) =>
+    //≡≡≡≡≡ Hann LowPass Window Filter ≡≡≡≡≡// @ImmortalFreedom
+    var float omega = math.pi / (1 + Period)
+    float E = 0.0
+    float D = 0.0
+    for int i=math.min(bar_index, Period - 1) to 0
+        float COEF = math.pow(math.sin(omega * (1 + i)), 2)
+        E +=  COEF * Series[i]
+        D +=  COEF
+    E / D
+
+algo(series float Series,
+     simple int   Period,
+     simple string Order) =>
+    switch Order
+        'jess()'    =>                jess(Series, Period)
+        'rema()'    =>                rema(Series, Period)                            // Single rema()
+        'drema()'   =>           rema(rema(Series, Period), Period)                   //   Dual rema()
+        'trema()'   =>      rema(rema(rema(Series, Period), Period), Period)          // Triple rema()
+        'qrema()'   => rema(rema(rema(rema(Series, Period), Period), Period), Period) //   Quad rema()
+        'ta.alma()' =>             ta.alma(Series, Period, 0.85, 6.0)
+        'ta.wma()'  =>              ta.wma(Series, Period)
+        'ta.ema()'  =>              ta.ema(Series, Period)
+        'hann()'    =>                hann(Series, Period)
+        'ta.sma()'  =>              ta.sma(Series, Period)
+        //▼▼▼▼▼ Parody Moving Averages To Chuckle At ▼▼▼▼▼
+        'ta.hma()'  => Period > 1 ? ta.hma(Series, Period) : Series //  (needs) Help Moving Average - Notice the periodic asymmetries inherent to HMA?
+        'ta.vwma()' =>             ta.vwma(Series, Period)          // Vomit Wannabe Moving Average
+        =>                          ta.rma(Series, Period)          //       Retiree Moving Average
+        
+
+float  source = input.source(   close, 'Source Series')
+string filter = input.string('rema()',      'Filters+', options=['jess()','rema()','drema()','trema()','qrema()','ta.alma()','ta.wma()','ta.ema()','ta.hma()','hann()','ta.sma()','ta.vwma','ta.rma()'])
+
+var HIDE_STATUS_SCALE_VALUES = display.all - display.status_line - display.price_scale
+plot(algo(source, 01, filter), '01', #EDDDDD, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 02, filter), '02', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 03, filter), '03', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 04, filter), '04', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 05, filter), '05', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 06, filter), '06', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 07, filter), '07', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 08, filter), '08', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 09, filter), '09', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+
+plot(algo(source, 10, filter), '10', #CC33FF99, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 11, filter), '11', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 12, filter), '12', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 13, filter), '13', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 14, filter), '14', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 15, filter), '15', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 16, filter), '16', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 17, filter), '17', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 18, filter), '18', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 19, filter), '19', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+
+plot(algo(source, 20, filter), '20', #CC33FF99, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 21, filter), '21', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 22, filter), '22', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 23, filter), '23', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 24, filter), '24', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 25, filter), '25', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 26, filter), '26', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 27, filter), '27', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 28, filter), '28', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 29, filter), '29', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+
+plot(algo(source, 30, filter), '30', #CC33FF99, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 31, filter), '31', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 32, filter), '32', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 33, filter), '33', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 34, filter), '34', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 35, filter), '35', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 36, filter), '36', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 37, filter), '37', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 38, filter), '38', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 39, filter), '39', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+
+plot(algo(source, 40, filter), '40', #CC33FF99, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 41, filter), '41', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 42, filter), '42', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 43, filter), '43', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 44, filter), '44', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 45, filter), '45', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 46, filter), '46', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 47, filter), '47', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 48, filter), '48', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 49, filter), '49', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+
+plot(algo(source, 50, filter), '50', #CC33FF99, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 51, filter), '51', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 52, filter), '52', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 53, filter), '53', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 54, filter), '54', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 55, filter), '55', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 56, filter), '56', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 57, filter), '57', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 58, filter), '58', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)
+plot(algo(source, 59, filter), '59', #CC33FF, display=HIDE_STATUS_SCALE_VALUES)

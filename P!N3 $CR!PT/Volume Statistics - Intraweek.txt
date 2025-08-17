@@ -1,0 +1,72 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Witnessing_Soul
+
+//@version=6
+indicator("Volume Statistics - Intraweek", shorttitle="Vol Statistics LTF", overlay=true, max_labels_count=500, max_lines_count=500, max_bars_back=5000)
+
+// 1) VOLUME SOURCE
+volSeries = volume
+
+// 2) CALCULATION SETTINGS
+groupCalc    = "Calculation Settings"
+periodChoice = input.string("24h", title="Benchmark period", options=["24h","7D"], group=groupCalc)
+methodChoice = input.string("Median", title="Central-tendency metric", options=["Median","Average"], group=groupCalc)
+
+// 2.1) APPEARANCE SETTINGS
+groupAppr      = "Appearance Settings"
+textSizeChoice = input.string("normal", title="Text size", options=["tiny","small","normal"], group=groupAppr)
+tablePosChoice = input.string("bottom_right", title="Table position", options=["top_left","top_right","bottom_left","bottom_right"], group=groupAppr)
+textSize       = textSizeChoice == "tiny" ? size.tiny : textSizeChoice == "small" ? size.small : size.normal
+tablePos       = tablePosChoice == "top_left"   ? position.top_left   : tablePosChoice == "top_right"  ? position.top_right  : tablePosChoice == "bottom_left" ? position.bottom_left : position.bottom_right
+
+// 3) METRICS CALCULATION
+barsWindow = timeframe.isintraday ? math.ceil((periodChoice == "24h" ? 1440 : 10080) / timeframe.multiplier) : 1
+len = math.min(bar_index + 1, barsWindow)
+volPrev = volSeries[1]
+lowestVol = ta.lowest(volPrev, len)
+highestVol = ta.highest(volPrev, len)
+centralVol = methodChoice == "Average" ? ta.sma(volPrev, len) : ta.percentile_linear_interpolation(volPrev, len, 50)
+// second & third highest
+var float[] arr = array.new_float()
+array.clear(arr)
+for i = 1 to len
+    array.push(arr, volPrev[i])
+array.sort(arr, order.descending)
+secondVol = array.size(arr) > 1 ? array.get(arr, 1) : na
+thirdVol  = array.size(arr) > 2 ? array.get(arr, 2) : na
+// diff
+diffVol = volSeries - centralVol
+
+// 4) TIME FORMAT (uses chart’s time zone)
+lowTime = str.format("{0,date,yyyy-MM-dd} {0,time,HH:mm}", ta.valuewhen(volPrev == lowestVol, time[1], 0))
+higTime = str.format("{0,date,yyyy-MM-dd} {0,time,HH:mm}", ta.valuewhen(volPrev == highestVol, time[1], 0))
+
+// 5) COLORS
+defaultBg  = color.rgb(4, 4, 4)
+headerBg   = #333333
+headerText = color.white
+labelColor = #AAAAAA
+valueColor = #FFD400
+timeColor  = color.white
+posColor   = color.green
+negColor   = color.red
+
+// 6) TABLE INITIALIZATION: 2 columns, 10 rows
+var table tbl = table.new(tablePos, 2, 10, border_width=1, bgcolor=defaultBg)
+
+// Title Row (row=0): title and timeframe+TF
+table.cell(tbl, 0, 0, "Volume Statistics (" + periodChoice + ")", text_color=headerText, bgcolor=headerBg, text_size=textSize)
+table.cell(tbl, 1, 0, " TF " + str.tostring(timeframe.period),                text_color=headerText, bgcolor=headerBg, text_size=textSize)
+
+// Metric labels and values rows 1-9
+string[] names = array.from( "Current",  "Diff vs " + methodChoice,  "Central (" + methodChoice + ")",  "Highest",  "Highest Time",  "2nd Highest", "3rd Highest", "Lowest",  "Lowest Time")
+string[] vals  = array.from( str.tostring(volSeries, "#,###"), (diffVol >= 0 ? "+" : "") + str.tostring(diffVol, "#,###"), str.tostring(centralVol, "#,###"), str.tostring(highestVol, "#,###"),  higTime,  str.tostring(secondVol, "#,###"),  str.tostring(thirdVol, "#,###"), str.tostring(lowestVol, "#,###"), lowTime)
+
+for i = 0 to array.size(names) - 1
+    row = i + 1
+    // label column (col=0)
+    table.cell(tbl, 0, row, array.get(names, i), text_color=labelColor, text_size=textSize)
+    // value column (col=1)
+    isTime = array.get(names, i) == "Lowest Time" or array.get(names, i) == "Highest Time"
+    col    = isTime ? timeColor : (array.get(names, i) == "Diff vs " + methodChoice ? (diffVol >= 0 ? posColor : negColor) : valueColor)
+    table.cell(tbl, 1, row, array.get(vals, i), text_color=col, text_size=textSize)

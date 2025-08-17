@@ -1,0 +1,150 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © PhenLabs inspired by LonesomeTheBlue (modified for multiple indicator types with scaling fixes and additional unique mappings)
+
+//@version=6
+indicator('3D Surface Modeling [PhenLabs]', shorttitle = 'PhenLabs - 3DSM', max_lines_count = 500)
+ind_type = input.string(defval = 'VWAP', title = 'Indicator Type', options = ['VWAP', 'Hurst', 'RSI', 'Stochastic', 'CCI', 'MFI', 'Fractal Dimension'])
+len1 = input.int(defval = 10, title = 'Starting Length', minval = 5, inline = 'len')
+step = input.int(defval = 5, title = 'Step', minval = 1, inline = 'len')
+colorup = input.string(defval = 'Green', title = 'Colors', options = ['Green', 'Red', 'Blue'], inline = 'colors')
+colordown = input.string(defval = 'Red', title = '', options = ['Green', 'Red', 'Blue'], inline = 'colors')
+width = input.int(defval = 2, title = 'Width', minval = 1, maxval = 5)
+
+var lines = array.new_line(500)
+for x = 0 to array.size(lines) - 1 by 1
+    line.delete(array.get(lines, x))
+
+get_value(length) =>
+    float val = na
+    if ind_type == 'VWAP'
+        float sumPV = ta.sma(hlc3 * volume, length)
+        float sumV = ta.sma(volume, length)
+        val := sumV == 0 ? na : sumPV / sumV
+        val
+    else if ind_type == 'Hurst'
+        if length < 2
+            val := na
+            val
+        else
+            mean = ta.sma(close, length)
+            dev = array.new_float(length)
+            for i = 0 to length - 1 by 1
+                array.set(dev, i, close[i] - mean)
+            cumdev = array.new_float(length)
+            array.set(cumdev, 0, array.get(dev, 0))
+            for i = 1 to length - 1 by 1
+                array.set(cumdev, i, array.get(cumdev, i - 1) + array.get(dev, i))
+            r = array.max(cumdev) - array.min(cumdev)
+            s = ta.stdev(close, length)
+            if s == 0 or r <= 0
+                val := na
+                val
+            else
+                rs = r / s
+                val := math.log(rs) / math.log(length)
+                val
+    else if ind_type == 'RSI'
+        val := ta.rsi(close, length)
+        val
+    else if ind_type == 'Stochastic'
+        val := ta.stoch(close, high, low, length)
+        val
+    else if ind_type == 'CCI'
+        val := ta.cci(ohlc4, length)
+        val
+    else if ind_type == 'MFI'
+        val := ta.mfi(hlc3, length)
+        val
+    else if ind_type == 'Fractal Dimension'
+        if length < 2
+            val := na
+            val
+        else
+            hh = ta.highest(high, length)
+            ll = ta.lowest(low, length)
+            ranges = hh - ll
+            if ranges == 0
+                val := na
+                val
+            else
+                float sum_dev = 0.0
+                for i = 1 to length - 1 by 1
+                    sum_dev := sum_dev + math.abs(high[i] - high[i - 1]) + math.abs(low[i] - low[i - 1])
+                    sum_dev
+                val := (math.log(sum_dev / ranges) + 1) / math.log(length)
+                val
+    val
+
+var ind1 = array.new_float(50, na)
+array.unshift(ind1, get_value(len1 + 9 * step))
+array.pop(ind1)
+var ind2 = array.new_float(50, na)
+array.unshift(ind2, get_value(len1 + 8 * step))
+array.pop(ind2)
+var ind3 = array.new_float(50, na)
+array.unshift(ind3, get_value(len1 + 7 * step))
+array.pop(ind3)
+var ind4 = array.new_float(50, na)
+array.unshift(ind4, get_value(len1 + 6 * step))
+array.pop(ind4)
+var ind5 = array.new_float(50, na)
+array.unshift(ind5, get_value(len1 + 5 * step))
+array.pop(ind5)
+var ind6 = array.new_float(50, na)
+array.unshift(ind6, get_value(len1 + 4 * step))
+array.pop(ind6)
+var ind7 = array.new_float(50, na)
+array.unshift(ind7, get_value(len1 + 3 * step))
+array.pop(ind7)
+var ind8 = array.new_float(50, na)
+array.unshift(ind8, get_value(len1 + 2 * step))
+array.pop(ind8)
+var ind9 = array.new_float(50, na)
+array.unshift(ind9, get_value(len1 + 1 * step))
+array.pop(ind9)
+var ind10 = array.new_float(50, na)
+array.unshift(ind10, get_value(len1 + 0 * step))
+array.pop(ind10)
+
+get_array(array_idx, element) =>
+    array_idx == 1 ? array.get(ind1, element) : array_idx == 2 ? array.get(ind2, element) : array_idx == 3 ? array.get(ind3, element) : array_idx == 4 ? array.get(ind4, element) : array_idx == 5 ? array.get(ind5, element) : array_idx == 6 ? array.get(ind6, element) : array_idx == 7 ? array.get(ind7, element) : array_idx == 8 ? array.get(ind8, element) : array_idx == 9 ? array.get(ind9, element) : array.get(ind10, element)
+
+float range_est = 0.0
+if ind_type == 'VWAP'
+    range_est := ta.highest(200) - ta.lowest(200)
+    range_est
+else if ind_type == 'Hurst' or ind_type == 'Fractal Dimension'
+    range_est := 2.0 // Typically between 1 and 2 for fractal dimension, 0-1 for Hurst, scaling to 2 for visibility
+    range_est
+else if ind_type == 'RSI' or ind_type == 'Stochastic' or ind_type == 'ADX' or ind_type == 'MFI'
+    range_est := 100.0
+    range_est
+else if ind_type == 'CCI'
+    range_est := 400.0 // CCI can range from -200 to +200 typically, scaling accordingly
+    range_est
+
+cwidth = range_est / 200
+cwidthcolor = range_est / 4000
+
+get_min_max(value) =>
+    math.min(math.max(value, 0), 255)
+
+get_color(value1, value2) =>
+    diff = math.round((value2 - value1) / cwidthcolor)
+    red = colorup == 'Red' ? get_min_max(128 + diff) : colordown == 'Red' ? get_min_max(128 - diff) : 0
+    green = colorup == 'Green' ? get_min_max(128 + diff) : colordown == 'Green' ? get_min_max(128 - diff) : 0
+    blue = colorup == 'Blue' ? get_min_max(128 + diff) : colordown == 'Blue' ? get_min_max(128 - diff) : 0
+    color.rgb(red, green, blue, 0)
+
+base = array.get(ind1, 0)
+if barstate.islast and not na(base)
+    for x = 39 to 0 by 1
+        b1 = base + x * cwidth
+        b2 = base + (x + 1) * cwidth
+        for y = 10 to 1 by 1
+            float y1_val = b1 + cwidth * y * 10 + get_array(y, x) - array.get(ind1, 0)
+            float y2_val = b2 + cwidth * y * 10 + get_array(y, x + 1) - array.get(ind1, 0)
+            array.set(lines, x + 40 * y, line.new(x1 = bar_index - 5 * (10 - y) - x * width, y1 = y1_val, x2 = bar_index - 5 * (10 - y) - x * width - width, y2 = y2_val, color = color.new(color.black, 50), style = line.style_dotted))
+
+            if y < 10
+                linefill.new(array.get(lines, x + 40 * y), array.get(lines, x + 40 * (y + 1)), color = get_color(get_array(y, x + 1), get_array(y, x)))

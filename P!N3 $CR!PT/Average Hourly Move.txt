@@ -1,0 +1,77 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © zeusbottrading
+
+//@version=6
+indicator('Average hourly move by @zeusbottrading',shorttitle = "AVG Hourly Move by @zeusbottrading", overlay=true, max_bars_back=500, calc_bars_count=30000)
+
+// Function: percentage move between high and low
+percent_move(h, l) =>
+    rng = h - l
+    mid = (h + l) / 2
+    mid != 0 ? rng / mid * 100 : na
+
+// Variables for high/low in the current hour
+var float hourHigh = na
+var float hourLow = na
+var int prevHour = na
+
+// Arrays for sums and counts for each hour (0-23)
+var sum_moves = array.new_float(24, 0.0)
+var count_moves = array.new_int(24, 0)
+
+// Detect new hour
+currHour = hour(time, syminfo.timezone)
+isNewHour = currHour != prevHour
+
+// Initialization on the first bar
+if na(hourHigh)
+    hourHigh := high
+    hourLow := low
+    prevHour := currHour
+
+if isNewHour
+    movePct = percent_move(hourHigh, hourLow)
+    if not na(movePct)
+        idx = prevHour
+        array.set(sum_moves, idx, array.get(sum_moves, idx) + movePct)
+        array.set(count_moves, idx, array.get(count_moves, idx) + 1)
+    hourHigh := high
+    hourLow := low
+    prevHour := currHour
+else
+    hourHigh := math.max(hourHigh, high)
+    hourLow := math.min(hourLow, low)
+
+// Calculate minimum and maximum average values for gradient
+float minVal = na
+float maxVal = na
+for i = 0 to 23
+    c = array.get(count_moves, i)
+    avgVal = c > 0 ? array.get(sum_moves, i) / c : na
+    if not na(avgVal)
+        minVal := na(minVal) ? avgVal : math.min(minVal, avgVal)
+        maxVal := na(maxVal) ? avgVal : math.max(maxVal, avgVal)
+
+// Helper function to get color from normalized value (0=red, 1=green)
+gradientColor(float t) =>
+    // Clamp t between 0 and 1
+    float nt = math.min(math.max(t, 0), 1)
+    color.new(color.rgb(255 * (1 - nt), 255 * nt, 0), 0)
+
+// Draw table with gradient color
+var table t = table.new(position.top_right, 3, 25, bgcolor=color.new(color.black, 0))
+if barstate.islast
+    table.cell(t, 0, 0, 'Hour', text_color=chart.bg_color)
+    table.cell(t, 1, 0, 'Avg move %', text_color=chart.bg_color)
+    for i = 0 to 23
+        c = array.get(count_moves, i)
+        avgPct = c > 0 ? array.get(sum_moves, i) / c : na
+        // Calculate normalized value for gradient (if min/max defined)
+        float normVal = na
+        if not na(avgPct) and not na(minVal) and not na(maxVal) and maxVal != minVal
+            normVal := (avgPct - minVal) / (maxVal - minVal)
+        // Text color based on gradient
+        color textColor = not na(normVal) ? gradientColor(normVal) : color.white
+
+        table.cell(t, 0, i + 1, str.tostring(i, '00') + ':00', text_color=chart.bg_color)
+        table.cell(t, 1, i + 1, not na(avgPct) ? str.tostring(avgPct, '#.##') + '%' : '-', text_color=textColor, text_formatting=text.format_bold)

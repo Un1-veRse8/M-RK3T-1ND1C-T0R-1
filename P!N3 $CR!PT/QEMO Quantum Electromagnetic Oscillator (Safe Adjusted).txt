@@ -1,0 +1,164 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Cmo22
+
+//@version=5
+indicator("QEMO: Quantum Electromagnetic Oscillator (Safe Adjusted)", overlay=false)
+
+// ———————————————————————————
+// 1. QUANTUM PRICE WAVEFUNCTION
+// ———————————————————————————
+
+// Inputs
+lookback  = input.int(20, "Volatility Lookback")
+num_bins  = input.int(20, "Price Bins")
+hbar      = input.float(1.0, "Planck Constant (Scaled)")
+
+// Calculate local volatility (σ)
+// Guard zero or na
+returns    = math.log(close / nz(close[1], close))  // fallback if close[1] is na
+float vol  = ta.stdev(returns, lookback) * math.sqrt(lookback)
+vol       := (na(vol) or vol < 1e-9) ? 1e-9 : vol
+
+// Discretize price grid around current price
+price_range = vol * close
+min_price   = close - price_range * 0.5
+max_price   = close + price_range * 0.5
+
+// Guard zero or negative bin_width
+bin_width_raw = (max_price - min_price) / num_bins
+bin_width     = na(bin_width_raw) or bin_width_raw <= 0.0 ? 1e-9 : bin_width_raw
+
+// Initialize probability density array
+var float[] prob_density = array.new_float(num_bins, 0.0)
+
+// Kinetic energy operator (discretized second derivative) 
+// only if we have enough bins to do i+1 and i-1 safely.
+if num_bins > 2
+    for i = 1 to num_bins - 2
+        // Use safe_bin_width to prevent division by zero
+        term = math.pow(-hbar, 2) / (2 * math.pow(bin_width, 2)) * (
+              array.get(prob_density, i+1) -
+              2 * array.get(prob_density, i) +
+              array.get(prob_density, i-1)
+         )
+        array.set(prob_density, i, term)
+
+// Potential energy (volatility + volume)
+volume_term = math.sqrt(volume) / 1e6
+potential   = vol * close * volume_term
+
+// Time evolution (simplified)
+for i = 0 to num_bins - 1
+    current_prob = array.get(prob_density, i)
+    array.set(prob_density, i, current_prob + potential * hbar)
+
+// Normalize probability density
+float total = array.sum(prob_density) + 1e-9
+for i = 0 to num_bins - 1
+    v = array.get(prob_density, i)
+    array.set(prob_density, i, v / total)
+
+// ———————————————————————————
+// 2. ELECTROMAGNETIC FIELDS
+// ———————————————————————————
+
+// Calculate buying (E) and selling (B) pressure fields
+buy_pressure  = math.max(close - open, 0) * volume
+E             = ta.ema(buy_pressure, lookback) / 1e6
+
+sell_pressure = math.max(open - close, 0) * volume
+B             = ta.ema(sell_pressure, lookback) / 1e6
+
+// Lorentz force (simplified)
+F_net = E - B
+
+// ———————————————————————————
+// 3. ENTANGLEMENT ENTROPY (SYSTEMIC RISK)
+// ———————————————————————————
+
+// Approximate entropy via correlation instability
+correlation_window = input.int(30, "Correlation Window")
+
+// Rolling arrays to store returns
+var float[] correlation_returns     = array.new_float(correlation_window, 0.0)
+var float[] correlation_returns_lag = array.new_float(correlation_window, 0.0)
+
+// Update the rolling arrays each bar
+array.unshift(correlation_returns,     returns)
+array.pop(correlation_returns)
+array.unshift(correlation_returns_lag, nz(returns[1]))
+array.pop(correlation_returns_lag)
+
+// Only compute covariance if we have enough bars
+float S = 0.0
+if bar_index >= correlation_window
+    float covariance = array.covariance(correlation_returns, correlation_returns_lag)
+    float variance   = array.variance(correlation_returns)  // or ta.variance(returns, correlation_window)
+    float lambda     = (variance == 0.0) ? 0.0 : math.abs(covariance / variance)
+
+    // Entropy-like measure
+    S := -lambda * math.log(lambda + 1e-9)
+
+// ———————————————————————————
+// 4. QEMO CALCULATION
+// ———————————————————————————
+
+// Expected price from wavefunction
+expected_price = 0.0
+for i = 0 to num_bins - 1
+    price = min_price + i * bin_width
+    expected_price += price * array.get(prob_density, i)
+
+// Stability weight (1 - entropy)
+stability = 1.0 - S
+
+// NOTE 1: math.tan(F_net) can blow up near π/2 + k*π 
+//         If you truly want tangent, you can clamp F_net:
+clamped_F_net = math.max(math.min(F_net, 1.4), -1.4)
+
+// NOTE 2: If you prefer a stable, bounded output, use tanh instead of tan:
+// final_force = math.tanh(F_net)
+
+// Final QEMO value (choose one):
+//qemo = expected_price * final_force * stability
+qemo = expected_price * math.tan(clamped_F_net) * stability
+
+f_ama(length,src) =>
+    ama = 0.0
+    hh = math.max(math.sign(ta.change(ta.highest(length))), 0)
+    ll = math.max(math.sign(ta.change(ta.lowest(length)) * -1), 0)
+    tc = math.pow(ta.sma(hh or ll ? 1 : 0, length), 2)
+    ama := nz(ama[1] + tc * (src - ama[1]), src)
+    ama // Return value
+
+qemo_plot = f_ama(lookback, qemo)
+
+// ———————————————————————————
+// Artistic Plotting (Fixed Arguments)
+// ———————————————————————————
+
+// Gradient Color based on QEMO value
+color qemo_color = qemo_plot >= 0 ? color.from_gradient(qemo_plot, 0, 50, color.aqua, color.blue) : color.from_gradient(qemo_plot, -50, 0, color.orange, color.red)
+
+// Background color reflecting stability (entropy)
+bg_color = color.new(color.from_gradient(S, 0, 1, color.black, color.white), 90)
+bgcolor(bg_color)
+
+// Plot QEMO with dynamic line width
+line_width = int(math.round(math.min(8, math.max(1, math.abs(qemo_plot)/5))))
+plot(qemo_plot, "QEMO Artistic", color=qemo_color, linewidth=2, style=plot.style_linebr)
+
+// Dynamic bands around zero for artistic effect
+upper_band = qemo_plot > 0 ? qemo_plot : 0
+lower_band = qemo_plot < 0 ? qemo_plot : 0
+plot(upper_band, color=color.new(color.teal, 70), linewidth=1, style=plot.style_area)
+plot(lower_band, color=color.new(color.maroon, 70), linewidth=1, style=plot.style_area)
+
+// Artistic reference line
+hline(0, "Quantum Balance", color=color.white, linestyle=hline.style_dotted, linewidth=1)
+
+
+// 99th and 1st percentile ranks of QEMO (last 1000 bars)
+plot(ta.percentile_nearest_rank(qemo_plot, 1000, 99), "99th Percentile", color=color.new(color.yellow, 50), linewidth=2, style=plot.style_line)
+plot(ta.percentile_nearest_rank(qemo_plot, 1000, 1), "1st Percentile", color=color.new(color.fuchsia, 50), linewidth=2, style=plot.style_line)
+

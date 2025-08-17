@@ -1,0 +1,209 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © dimmiditto
+
+//@version=6
+indicator('Signal-to-Noise Ratio', shorttitle = 'SNR', overlay = false, max_lines_count = 500)
+
+// ─────────────────────────────────────────────
+// Inputs
+len = input.int(8, title = 'Window (bars)', minval = 3)
+corr_len = input.int(24, title = 'Correlation Window (bars)', minval = 2)
+snr_min = input.float(0.50, title = 'Min SNR', step = 0.025)
+raw_min = input.float(0.30, title = 'Min Raw Sharpe', step = 0.025)
+tstat_min = input.float(1.30, title = 'Min t-Statistic (mean)', step = 0.05)
+
+snr_mode = input.string(title = 'SNR Mode', defval = 'Directional (slope / residual stdev)', options = ['Directional (slope / residual stdev)', 'Slope / ATR'], tooltip = 'Directional: regression slope normalized by residual noise stdev.\nSlope/ATR: regression slope normalized by ATR.')
+
+show_delta = input.bool(true, title = 'Show Δ (SNR - RawSharpe)?')
+show_tSlope_plot = input.bool(false, title = 'Show t-Slope?')
+
+// ─────────────────────────────────────────────
+// Helpers
+fmt6(v) =>
+    na(v) ? 'na' : str.tostring(math.round(v * 1e6) / 1e6)
+
+// Linear-regression slope via correlation with bar_index
+lr_slope(_src, _len) =>
+    _x = bar_index * 1.0
+    _r = ta.correlation(_src, _x, _len)
+    _sy = ta.stdev(_src, _len)
+    _sx = ta.stdev(_x, _len)
+    _sx != 0 and not na(_r) ? _r * _sy / _sx : na
+
+// t-stat of slope from correlation r with time (bar_index)
+t_from_corr(_r, _n) =>
+    denom = 1 - _r * _r
+    valid = _n > 2 and not na(_r) and denom > 0
+    valid ? _r * math.sqrt((_n - 2) / denom) : na
+
+// SNR variants
+snr_dir(_src, _len) =>
+    lr = ta.linreg(_src, _len, 0) // regression baseline
+    slope = lr_slope(_src, _len) // price units per bar
+    resid = _src - lr
+    noise = ta.stdev(resid, _len) // residual noise
+    noise != 0 ? slope / noise : na
+
+snr_atr(_src, _len) =>
+    slope = lr_slope(_src, _len)
+    atrv = ta.atr(_len)
+    atrv != 0 ? slope / atrv : na
+
+// Core metrics (SNR + RawSharpe + t-mean + t-eff + t-slope)
+// NOTE: corr_len used for rho1 (n_eff). SNR & t_slope use len.
+defineMetrics(_src, _length, _corrlen) =>
+    // SNR
+    _snr = snr_mode == 'Directional (slope / residual stdev)' ? snr_dir(_src, _length) : snr_atr(_src, _length)
+    // Arithmetic returns
+    _ret = (_src - _src[1]) / _src[1]
+    _mu = ta.sma(_ret, _length)
+    _sig = ta.stdev(_ret, _length)
+    _rawSharpe = _sig != 0 ? _mu / _sig : na
+    // t-Statistic of mean (classic)
+    _t_mean = _rawSharpe * math.sqrt(_length)
+    // Effective sample size using lag-1 autocorrelation over corr_len
+    _rho1 = ta.correlation(_ret, _ret[1], _corrlen)
+    _neff_raw = 1 + _rho1 != 0 ? _length * (1 - _rho1) / (1 + _rho1) : 1
+    _neff = math.max(1.0, _neff_raw)
+    _t_eff = _rawSharpe * math.sqrt(_neff)
+    // t-stat of slope via corr(price,time) over len
+    _r_time = ta.correlation(_src, bar_index * 1.0, _length)
+    _t_slope = t_from_corr(_r_time, _length)
+    [_snr, _rawSharpe, _t_mean, _t_eff, _t_slope]
+
+// ─────────────────────────────────────────────
+// Compute on current chart TF (no MTF)
+[snr, rawSharpe, t_mean, t_eff, t_slope] = defineMetrics(close, len, corr_len)
+
+// Signals (use t_mean; cambia in t_eff se preferisci)
+longSignal = snr >= snr_min and rawSharpe >= raw_min and t_mean >= tstat_min
+shortSignal = snr <= -snr_min and rawSharpe <= -raw_min and t_mean <= -tstat_min
+
+// ─────────────────────────────────────────────
+// Plots — const titles
+plot(snr, title = 'SNR', color = color.green, linewidth = 2)
+plot(rawSharpe, title = 'Raw Sharpe', color = color.teal, linewidth = 2)
+plot(t_mean, title = 't-Statistic (mean)', color = color.fuchsia, linewidth = 2)
+plot(show_delta ? snr - rawSharpe : na, title = 'Delta SNR - RawSharpe', color = color.orange, linewidth = 2)
+plot(show_tSlope_plot ? t_slope : na, title = 't-Slope', color = color.blue, linewidth = 2)
+hline(0, title = 'Zero', color = color.rgb(92, 92, 94), linestyle = hline.style_solid)
+
+// Shapes (pannello indicatore)
+plotshape(longSignal, title = 'Long Entry', style = shape.triangleup, location = location.bottom, color = color.green, size = size.tiny)
+plotshape(shortSignal, title = 'Short Entry', style = shape.triangledown, location = location.top, color = color.red, size = size.tiny)
+bgcolor(longSignal ? color.new(color.green, 90) : na)
+bgcolor(shortSignal ? color.new(color.red, 90) : na)
+
+
+// ─────────────────────────────────────────────
+// DIVERGENCE LINES (single TF, indicator panel)
+
+// Inputs
+groupDiv = 'Divergences'
+useDiv = input.bool(true, 'Enable Divergences?', group = groupDiv)
+divSource = input.string('SNR', 'Divergence Source', options = ['SNR', 't-eff', 't-mean', 't-slope'], group = groupDiv)
+leftBarsDiv = input.int(10, 'Pivot Left', minval = 1, group = groupDiv)
+rightBarsDiv = input.int(10, 'Pivot Right', minval = 1, group = groupDiv)
+detectHidden = input.bool(true, 'Detect Hidden Divergences?', group = groupDiv)
+useTrendFlt = input.bool(true, 'Use Trend Filter for Hidden?', group = groupDiv)
+trendFilterBy = input.string('SNR sign', 'Trend Filter', options = ['SNR sign', 'EMA slope'], group = groupDiv)
+emaLenDiv = input.int(21, 'EMA length (if EMA filter)', minval = 1, group = groupDiv)
+
+showDivLines = input.bool(true, 'Draw Divergence Lines', group = groupDiv)
+maxDivLines = input.int(120, 'Max stored lines', minval = 10, group = groupDiv)
+colBearReg = input.color(color.red, 'Color Regular Bearish', group = groupDiv)
+colBullReg = input.color(color.lime, 'Color Regular Bullish', group = groupDiv)
+colBearHid = input.color(color.orange, 'Color Hidden Bearish', group = groupDiv)
+colBullHid = input.color(color.teal, 'Color Hidden Bullish', group = groupDiv)
+lnWidth = input.int(2, 'Line width', minval = 1, maxval = 4, group = groupDiv)
+lnStyle = input.string('solid', 'Line style', options = ['solid', 'dotted', 'dashed'], group = groupDiv)
+
+line_style(_s) =>
+    _s == 'dotted' ? line.style_dotted : _s == 'dashed' ? line.style_dashed : line.style_solid
+
+// Series chosen
+ind = divSource == 'SNR' ? snr : divSource == 't-eff' ? t_eff : divSource == 't-mean' ? t_mean : t_slope
+
+// Pivots price
+ph = ta.pivothigh(high, leftBarsDiv, rightBarsDiv)
+pl = ta.pivotlow(low, leftBarsDiv, rightBarsDiv)
+// Pivots indicator
+ih = ta.pivothigh(ind, leftBarsDiv, rightBarsDiv)
+il = ta.pivotlow(ind, leftBarsDiv, rightBarsDiv)
+
+// Memory last confirmed pivots (value + bar index)
+var float lastPH = na
+var float lastPL = na
+var float lastIH = na
+var float lastIL = na
+var int lastPHBar = na
+var int lastPLBar = na
+var int lastIHBar = na
+var int lastILBar = na
+
+// Trend filter (for hidden)
+emaNow = ta.ema(close, emaLenDiv)
+upTrend = trendFilterBy == 'SNR sign' ? snr > 0 : emaNow > emaNow[1]
+dnTrend = trendFilterBy == 'SNR sign' ? snr < 0 : emaNow < emaNow[1]
+
+// Lines management
+var array<line> divLines = array.new_line()
+addDivLine(_x1, _y1, _x2, _y2, _col) =>
+    l = line.new(_x1, _y1, _x2, _y2, xloc = xloc.bar_index, extend = extend.none, color = _col, width = lnWidth, style = line_style(lnStyle))
+    array.push(divLines, l)
+    if array.size(divLines) > maxDivLines
+        old = array.shift(divLines)
+        line.delete(old)
+
+// Pivot bar indexes (confirmed = bar_index - rightBarsDiv)
+currPHBar = not na(ph) ? bar_index - rightBarsDiv : na
+currPLBar = not na(pl) ? bar_index - rightBarsDiv : na
+currIHBar = not na(ih) ? bar_index - rightBarsDiv : na
+currILBar = not na(il) ? bar_index - rightBarsDiv : na
+
+// Divergences
+bearDivNow = useDiv and not na(ph) and not na(ih) and not na(lastPH) and not na(lastIH) and ph > lastPH and ih < lastIH // Regular Bearish
+bullDivNow = useDiv and not na(pl) and not na(il) and not na(lastPL) and not na(lastIL) and pl < lastPL and il > lastIL // Regular Bullish
+hiddenBearNow = useDiv and detectHidden and not na(ph) and not na(ih) and not na(lastPH) and not na(lastIH) and ph < lastPH and ih > lastIH and (not useTrendFlt or dnTrend)
+hiddenBullNow = useDiv and detectHidden and not na(pl) and not na(il) and not na(lastPL) and not na(lastIL) and pl > lastPL and il < lastIL and (not useTrendFlt or upTrend)
+
+// Draw lines on indicator panel (indicator pivot → indicator pivot)
+if showDivLines
+    if bearDivNow and not na(lastIH) and not na(lastIHBar) and not na(ih) and not na(currIHBar)
+        addDivLine(lastIHBar, lastIH, currIHBar, ih, colBearReg)
+    if bullDivNow and not na(lastIL) and not na(lastILBar) and not na(il) and not na(currILBar)
+        addDivLine(lastILBar, lastIL, currILBar, il, colBullReg)
+    if hiddenBearNow and not na(lastIH) and not na(lastIHBar) and not na(ih) and not na(currIHBar)
+        addDivLine(lastIHBar, lastIH, currIHBar, ih, colBearHid)
+    if hiddenBullNow and not na(lastIL) and not na(lastILBar) and not na(il) and not na(currILBar)
+        addDivLine(lastILBar, lastIL, currILBar, il, colBullHid)
+
+// Optional small markers (panel-safe)
+plotshape(bearDivNow, title = 'Bearish Divergence', style = shape.circle, location = location.top, color = color.red, size = size.tiny, offset = -rightBarsDiv)
+plotshape(bullDivNow, title = 'Bullish Divergence', style = shape.circle, location = location.bottom, color = color.lime, size = size.tiny, offset = -rightBarsDiv)
+plotshape(hiddenBearNow, title = 'Hidden Bearish Divergence', style = shape.circle, location = location.top, color = color.orange, size = size.tiny, offset = -rightBarsDiv)
+plotshape(hiddenBullNow, title = 'Hidden Bullish Divergence', style = shape.circle, location = location.bottom, color = color.teal, size = size.tiny, offset = -rightBarsDiv)
+
+// Update memory after checks
+if not na(ph)
+    lastPH := ph
+    lastPHBar := currPHBar
+    lastPHBar
+if not na(pl)
+    lastPL := pl
+    lastPLBar := currPLBar
+    lastPLBar
+if not na(ih)
+    lastIH := ih
+    lastIHBar := currIHBar
+    lastIHBar
+if not na(il)
+    lastIL := il
+    lastILBar := currILBar
+    lastILBar
+
+// Alerts (const titles)
+alertcondition(bearDivNow, 'Bearish Divergence', 'Bearish divergence on selected indicator')
+alertcondition(bullDivNow, 'Bullish Divergence', 'Bullish divergence on selected indicator')
+alertcondition(hiddenBearNow, 'Hidden Bearish Divergence', 'Hidden bearish divergence on selected indicator')
+alertcondition(hiddenBullNow, 'Hidden Bullish Divergence', 'Hidden bullish divergence on selected indicator')

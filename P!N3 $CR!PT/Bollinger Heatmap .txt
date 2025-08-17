@@ -1,0 +1,158 @@
+// Subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © Quantitative
+
+// @version=6
+indicator(title = "Bollinger Heatmap [Quantitative]", overlay = false)
+
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+// ————— CONSTANTS
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+
+int    TOTAL_BARS    = 30
+int    LINE_WIDTH    = 4
+
+string BB_GROUP_NAME = "Bollinger Bands"
+string HM_GROUP_NAME = "Heatmap Colors"
+string RANGE_COLOR   = " Range Color"
+string BAND_LENGTH   = "Band Length "
+
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+// ————— INPUTS
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+
+bbStd       = input.float(2.0,       "Standard Deviation",        group = BB_GROUP_NAME)
+
+bb01Length  = input.int(14,          BAND_LENGTH + "1",           group = BB_GROUP_NAME)
+bb02Length  = input.int(21,          BAND_LENGTH + "2",           group = BB_GROUP_NAME)
+bb03Length  = input.int(28,          BAND_LENGTH + "3",           group = BB_GROUP_NAME)
+bb04Length  = input.int(35,          BAND_LENGTH + "4",           group = BB_GROUP_NAME)
+bb05Length  = input.int(42,          BAND_LENGTH + "5",           group = BB_GROUP_NAME)
+bb06Length  = input.int(49,          BAND_LENGTH + "6",           group = BB_GROUP_NAME)
+bb07Length  = input.int(56,          BAND_LENGTH + "7",           group = BB_GROUP_NAME)
+bb08Length  = input.int(63,          BAND_LENGTH + "8",           group = BB_GROUP_NAME)
+bb09Length  = input.int(70,          BAND_LENGTH + "9",           group = BB_GROUP_NAME)
+bb10Length  = input.int(77,          BAND_LENGTH + "10",          group = BB_GROUP_NAME)
+bb11Length  = input.int(84,          BAND_LENGTH + "11",          group = BB_GROUP_NAME)
+bb12Length  = input.int(91,          BAND_LENGTH + "12",          group = BB_GROUP_NAME)
+bb13Length  = input.int(98,          BAND_LENGTH + "13",          group = BB_GROUP_NAME)
+bb14Length  = input.int(105,         BAND_LENGTH + "14",          group = BB_GROUP_NAME)
+bb15Length  = input.int(112,         BAND_LENGTH + "15",          group = BB_GROUP_NAME)
+bb16Length  = input.int(119,         BAND_LENGTH + "16",          group = BB_GROUP_NAME)
+bb17Length  = input.int(126,         BAND_LENGTH + "17",          group = BB_GROUP_NAME)
+bb18Length  = input.int(133,         BAND_LENGTH + "18",          group = BB_GROUP_NAME)
+bb19Length  = input.int(140,         BAND_LENGTH + "19",          group = BB_GROUP_NAME)
+bb20Length  = input.int(147,         BAND_LENGTH + "20",          group = BB_GROUP_NAME)
+bb21Length  = input.int(154,         BAND_LENGTH + "21",          group = BB_GROUP_NAME)
+bb22Length  = input.int(161,         BAND_LENGTH + "22",          group = BB_GROUP_NAME)
+bb23Length  = input.int(168,         BAND_LENGTH + "23",          group = BB_GROUP_NAME)
+bb24Length  = input.int(175,         BAND_LENGTH + "24",          group = BB_GROUP_NAME)
+bb25Length  = input.int(182,         BAND_LENGTH + "25",          group = BB_GROUP_NAME)
+bb26Length  = input.int(210,         BAND_LENGTH + "26",          group = BB_GROUP_NAME)
+bb27Length  = input.int(238,         BAND_LENGTH + "27",          group = BB_GROUP_NAME)
+bb28Length  = input.int(273,         BAND_LENGTH + "28",          group = BB_GROUP_NAME)
+bb29Length  = input.int(315,         BAND_LENGTH + "29",          group = BB_GROUP_NAME)
+bb30Length  = input.int(364,         BAND_LENGTH + "30",          group = BB_GROUP_NAME)
+
+hot5Color   = input.color(#de144d, "[90-100]" + RANGE_COLOR,    group = HM_GROUP_NAME)
+hot4Color   = input.color(#e78349, "[80-90]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+hot3Color   = input.color(#e2af4a, "[70-80]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+hot2Color   = input.color(#d7d96d, "[60-70]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+hot1Color   = input.color(#40da6e, "[50-60]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+cold1Color  = input.color(#1b2e7b, "[40-50]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+cold2Color  = input.color(#1e46b4, "[30-40]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+cold3Color  = input.color(#0372fa, "[20-30]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+cold4Color  = input.color(#25a2cf, "[10-20]"  + RANGE_COLOR,    group = HM_GROUP_NAME)
+cold5Color  = input.color(#34b4d1, "[0-10]"   + RANGE_COLOR,    group = HM_GROUP_NAME)
+
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+// ————— FUNCTIONS
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+
+// @function               Derives color from distance ratio
+// @param distanceRatio    (float) Current price's relative location in a set of bands
+// @returns                (color) Color value
+fColorFromRatio(float distanceRatio) =>
+     distanceRatio >= 0.9 ? cold5Color : distanceRatio >= 0.8 ? cold4Color : 
+     distanceRatio >= 0.7 ? cold3Color : distanceRatio >= 0.6 ? cold2Color :
+     distanceRatio >= 0.5 ? cold1Color : distanceRatio >= 0.4 ? hot1Color : 
+     distanceRatio >= 0.3 ? hot2Color  : distanceRatio >= 0.2 ? hot3Color : 
+     distanceRatio >= 0.1 ? hot4Color  : hot5Color
+
+// @function               Clamps value to a given range
+// @param x                (float) Input float value 
+// @param lower            (float) Lower bound of the clamping range
+// @param upper            (float) Upper bound of the clamping range
+// @returns                (float) Clamped float value within the [lower-upper] range
+fClamp(float x, float lower, float upper) =>
+    math.min(math.max(x, lower), upper)
+
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+// ————— LOGIC
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+
+var color[] bbColors = array.new_color(TOTAL_BARS, color.white)
+const int[] bbLengths = array.from(
+  bb01Length, bb02Length, bb03Length, bb04Length, bb05Length, 
+  bb06Length, bb07Length, bb08Length, bb09Length, bb10Length, 
+  bb11Length, bb12Length, bb13Length, bb14Length, bb15Length,
+  bb16Length, bb17Length, bb18Length, bb19Length, bb20Length,
+  bb21Length, bb22Length, bb23Length, bb24Length, bb25Length,
+  bb26Length, bb27Length, bb28Length, bb29Length, bb30Length
+ )
+
+// Calculate the price's relative location to its upper and lower bands
+for i = 0 to (TOTAL_BARS - 1)
+    // Timeframe for the current band
+    int length = array.get(bbLengths, i)
+    // Basis (ignored), upper and lower bands for timeframe
+    [_, upperBand, lowerBand] = ta.bb(close, length, bbStd)
+
+    // Range and relative distance ratio
+    float bandRange = upperBand - lowerBand
+    float distanceToLower = close - lowerBand
+    float distanceRatio = fClamp(distanceToLower / bandRange, 0.0, 1.0)
+
+    // Convert distance ratio to color
+    color color = fColorFromRatio(distanceRatio)
+    array.set(bbColors, i, color)
+
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+// ————— VISUALS 
+// . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . //
+
+// Invisible lines for plot adjustment
+plot(-5,  title = "",  color = #00000000,             linewidth = LINE_WIDTH)
+plot(45,  title = "",  color = #00000000,             linewidth = LINE_WIDTH)
+
+// Heatmap lines
+plot(0,   title = "",  color = array.get(bbColors, 0),  linewidth = LINE_WIDTH)
+plot(1,   title = "",  color = array.get(bbColors, 1),  linewidth = LINE_WIDTH)
+plot(2,   title = "",  color = array.get(bbColors, 2),  linewidth = LINE_WIDTH)
+plot(3,   title = "",  color = array.get(bbColors, 3),  linewidth = LINE_WIDTH)
+plot(4,   title = "",  color = array.get(bbColors, 4),  linewidth = LINE_WIDTH)
+plot(5,   title = "",  color = array.get(bbColors, 5),  linewidth = LINE_WIDTH)
+plot(6,   title = "",  color = array.get(bbColors, 6),  linewidth = LINE_WIDTH)
+plot(7,   title = "",  color = array.get(bbColors, 7),  linewidth = LINE_WIDTH)
+plot(8,   title = "",  color = array.get(bbColors, 8),  linewidth = LINE_WIDTH)
+plot(9,   title = "",  color = array.get(bbColors, 9),  linewidth = LINE_WIDTH)
+plot(10,  title = "",  color = array.get(bbColors, 10), linewidth = LINE_WIDTH)
+plot(11,  title = "",  color = array.get(bbColors, 11), linewidth = LINE_WIDTH)
+plot(12,  title = "",  color = array.get(bbColors, 12), linewidth = LINE_WIDTH)
+plot(13,  title = "",  color = array.get(bbColors, 13), linewidth = LINE_WIDTH)
+plot(14,  title = "",  color = array.get(bbColors, 14), linewidth = LINE_WIDTH)
+plot(15,  title = "",  color = array.get(bbColors, 15), linewidth = LINE_WIDTH)
+plot(16,  title = "",  color = array.get(bbColors, 16), linewidth = LINE_WIDTH)
+plot(17,  title = "",  color = array.get(bbColors, 17), linewidth = LINE_WIDTH)
+plot(18,  title = "",  color = array.get(bbColors, 18), linewidth = LINE_WIDTH)
+plot(19,  title = "",  color = array.get(bbColors, 19), linewidth = LINE_WIDTH)
+plot(20,  title = "",  color = array.get(bbColors, 20), linewidth = LINE_WIDTH)
+plot(21,  title = "",  color = array.get(bbColors, 21), linewidth = LINE_WIDTH)
+plot(22,  title = "",  color = array.get(bbColors, 22), linewidth = LINE_WIDTH)
+plot(23,  title = "",  color = array.get(bbColors, 23), linewidth = LINE_WIDTH)
+plot(24,  title = "",  color = array.get(bbColors, 24), linewidth = LINE_WIDTH)
+plot(25,  title = "",  color = array.get(bbColors, 25), linewidth = LINE_WIDTH)
+plot(26,  title = "",  color = array.get(bbColors, 26), linewidth = LINE_WIDTH)
+plot(27,  title = "",  color = array.get(bbColors, 27), linewidth = LINE_WIDTH)
+plot(28,  title = "",  color = array.get(bbColors, 28), linewidth = LINE_WIDTH)
+plot(29,  title = "",  color = array.get(bbColors, 29), linewidth = LINE_WIDTH)

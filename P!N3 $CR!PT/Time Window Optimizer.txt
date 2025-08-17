@@ -1,0 +1,589 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TheUltimator5
+
+//@version=6
+indicator("Time Window Optimizer [theUltimator5]", shorttitle="TWO [u5]", overlay=false)
+
+// NEW: Auto-optimization feature
+auto_optimize = input.bool(true, title="Auto-Find Best 30min Window", tooltip="When enabled, automatically finds the 30-minute window with highest average returns during market hours (9:30 AM - 4:00 PM EST)", group="Auto Optimization")
+show_all_lines = input.bool(false, title="Show All 13 Lines", tooltip="When auto-optimize is enabled, this will show performance lines for all 13 time windows", group="Auto Optimization")
+best_line_color_input = input.color(color.new(color.aqua, 0), title="Best Window Line Color", tooltip="Color for the line with highest average returns", group="Auto Optimization")
+
+// Input parameters for time window using session (most user-friendly)
+time_session = input.session("0930-1030", title="Time Window", tooltip="Format: HHMM-HHMM (e.g., 0930-1030 for 9:30 AM to 10:30 AM)", group="Time Window")
+
+// Simple crypto timezone adjustment
+crypto_timezone_offset = input.int(4, title="Crypto Time Offset (hours)", tooltip="Hours to add to match your desired time. Try 4 for EST, 5 for EDT, etc.", minval=-12, maxval=12, group="Time Window")
+
+// Table showing statistics
+show_table = input.bool(true, title="Show Statistics Table", group="Table Options")
+table_position = input.string("top_left", title="Table Position", options=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"], group="Table Options")
+
+// Background highlight option
+show_background = input.bool(false, title="Highlight Background", tooltip="Show background color during time window", group="Visual Options")
+bg_color = input.color(color.new(color.yellow, 90), title="Background Color", group="Visual Options")
+
+// Check if we're looking at a crypto asset
+is_crypto = str.contains(str.upper(syminfo.prefix), "BINANCE") or 
+             str.contains(str.upper(syminfo.prefix), "COINBASE") or 
+             str.contains(str.upper(syminfo.prefix), "KRAKEN") or 
+             str.contains(str.upper(syminfo.prefix), "BITFINEX") or 
+             str.contains(str.upper(syminfo.prefix), "BYBIT") or 
+             str.contains(str.upper(syminfo.prefix), "KUCOIN") or 
+             str.contains(str.upper(syminfo.prefix), "OKX") or 
+             str.contains(str.upper(syminfo.prefix), "CRYPTO") or
+             str.contains(str.upper(syminfo.prefix), "PHEMEX") or
+             str.contains(str.upper(syminfo.prefix), "MEXC") or
+             str.contains(str.upper(syminfo.prefix), "HUOBI") or
+             str.contains(str.upper(syminfo.prefix), "GATE") or
+             str.contains(str.upper(syminfo.prefix), "BITGET") or
+             str.contains(str.upper(syminfo.prefix), "BITSTAMP") or
+             str.contains(str.upper(syminfo.prefix), "GEMINI") or
+             str.contains(str.upper(syminfo.prefix), "FTX") or
+             str.contains(str.upper(syminfo.prefix), "DERIBIT") or
+             str.contains(str.upper(syminfo.prefix), "BITMEX") or
+             str.contains(str.upper(syminfo.prefix), "BITTREX") or
+             str.contains(str.upper(syminfo.prefix), "POLONIEX") or
+             str.contains(str.upper(syminfo.prefix), "UPBIT") or
+             str.contains(str.upper(syminfo.prefix), "BITHUMB") or
+             str.contains(str.upper(syminfo.prefix), "COINCHECK") or
+             str.contains(str.upper(syminfo.prefix), "BITFLYER") or
+             str.contains(str.upper(syminfo.prefix), "LIQUID") or
+             str.contains(str.upper(syminfo.prefix), "DYDX") or
+             str.contains(str.upper(syminfo.prefix), "PERPETUAL") or
+             str.contains(str.upper(syminfo.prefix), "UNISWAP") or
+             str.contains(str.upper(syminfo.prefix), "PANCAKE") or
+             str.contains(str.upper(syminfo.prefix), "SUSHI") or
+             str.contains(str.upper(syminfo.prefix), "1INCH") or
+             str.contains(str.upper(syminfo.prefix), "DEX") or
+             str.contains(str.upper(syminfo.prefix), "WHITEBIT") or
+             str.contains(str.upper(syminfo.prefix), "BITMART") or
+             str.contains(str.upper(syminfo.prefix), "LBANK") or
+             str.contains(str.upper(syminfo.prefix), "ASCENDEX") or
+             str.contains(str.upper(syminfo.prefix), "WAZIRX") or
+             str.contains(str.upper(syminfo.prefix), "COINSPH") or
+             str.contains(str.upper(syminfo.prefix), "BINANCEUS") or
+             str.contains(str.upper(syminfo.ticker), "USDT") or
+             str.contains(str.upper(syminfo.ticker), "USDC") or
+             str.contains(str.upper(syminfo.ticker), "BTC") or
+             str.contains(str.upper(syminfo.ticker), "ETH") or
+             str.contains(str.upper(syminfo.ticker), "BUSD") or
+             str.contains(str.upper(syminfo.ticker), "PERP")
+
+// Input parameters for colors
+chart_type = input.string("Candles", title="Chart Type", options=["Candles", "Line"], group="Colors")
+line_color_input = input.color(color.new(color.blue, 30), title="Line Color (during window)", group="Colors")
+bullish_window_color = input.color(color.new(color.blue, 50), title="Bullish Candle Color (during window)", group="Colors")
+bearish_window_color = input.color(color.new(color.orange, 50), title="Bearish Candle Color (during window)", group="Colors")
+
+// NEW: Variables for auto-optimization
+var string best_window = "0930-1000"
+var bool optimization_complete = false
+var float best_average_return = na
+var int best_block_number = 1
+
+// Variables for best performing block (moved to top level)
+var int best_performing_block = 0
+var float highest_cumulative_return = -999999.0
+var string best_block_time = "09:30-10:00"
+var color best_block_color = color.red
+
+// NEW: Variables for buy and hold comparison
+var float first_price = na
+var float buy_hold_return = 0.0
+
+// Arrays for optimization results - using separate arrays instead of nested arrays
+var array<float> all_block_results = array.new<float>()
+var array<int> all_block_bar_counts = array.new<int>()
+
+// Separate arrays for each time block's daily changes (flattened structure)
+var array<float> block_0_changes = array.new<float>()
+var array<float> block_1_changes = array.new<float>()
+var array<float> block_2_changes = array.new<float>()
+var array<float> block_3_changes = array.new<float>()
+var array<float> block_4_changes = array.new<float>()
+var array<float> block_5_changes = array.new<float>()
+var array<float> block_6_changes = array.new<float>()
+var array<float> block_7_changes = array.new<float>()
+var array<float> block_8_changes = array.new<float>()
+var array<float> block_9_changes = array.new<float>()
+var array<float> block_10_changes = array.new<float>()
+var array<float> block_11_changes = array.new<float>()
+var array<float> block_12_changes = array.new<float>()
+
+// Function to get the appropriate block changes array
+get_block_changes_array(block_num) =>
+    switch block_num
+        0 => block_0_changes
+        1 => block_1_changes
+        2 => block_2_changes
+        3 => block_3_changes
+        4 => block_4_changes
+        5 => block_5_changes
+        6 => block_6_changes
+        7 => block_7_changes
+        8 => block_8_changes
+        9 => block_9_changes
+        10 => block_10_changes
+        11 => block_11_changes
+        12 => block_12_changes
+        => block_0_changes  // fallback
+
+// Function to check if current bar is within the time window
+is_in_time_window() =>
+    effective_session = auto_optimize ? best_window : time_session
+    
+    if is_crypto
+        // For crypto: use direct time comparison with timezone adjustment
+        session_parts = str.split(effective_session, "-")
+        start_time_str = array.get(session_parts, 0)
+        end_time_str = array.get(session_parts, 1)
+        
+        base_start_hour = math.floor(str.tonumber(start_time_str) / 100)
+        start_minute = str.tonumber(start_time_str) % 100
+        base_end_hour = math.floor(str.tonumber(end_time_str) / 100)
+        end_minute = str.tonumber(end_time_str) % 100
+        
+        target_start_hour = base_start_hour + crypto_timezone_offset
+        target_end_hour = base_end_hour + crypto_timezone_offset
+        
+        while target_start_hour < 0
+            target_start_hour := target_start_hour + 24
+        while target_start_hour >= 24
+            target_start_hour := target_start_hour - 24
+        while target_end_hour < 0
+            target_end_hour := target_end_hour + 24  
+        while target_end_hour >= 24
+            target_end_hour := target_end_hour - 24
+        
+        current_hour = hour(time)
+        current_minute = minute(time)
+        
+        start_minutes = target_start_hour * 60 + start_minute
+        end_minutes = target_end_hour * 60 + end_minute
+        current_minutes = current_hour * 60 + current_minute
+        
+        if end_minutes < start_minutes
+            current_minutes >= start_minutes or current_minutes <= end_minutes
+        else
+            current_minutes >= start_minutes and current_minutes <= end_minutes
+    else
+        not na(time(timeframe.period, effective_session))
+
+// All time blocks
+block_sessions = array.from(
+     "0930-1000", "1000-1030", "1030-1100", "1100-1130", "1130-1200",
+     "1200-1230", "1230-1300", "1300-1330", "1330-1400", "1400-1430",
+     "1430-1500", "1500-1530", "1530-1600"
+ )
+
+// Function to check if current bar is within a specific time window
+is_in_specific_window(session_str) =>
+    if is_crypto
+        // For crypto: use direct time comparison with timezone adjustment
+        session_parts = str.split(session_str, "-")
+        start_time_str = array.get(session_parts, 0)
+        end_time_str = array.get(session_parts, 1)
+        
+        base_start_hour = math.floor(str.tonumber(start_time_str) / 100)
+        start_minute = str.tonumber(start_time_str) % 100
+        base_end_hour = math.floor(str.tonumber(end_time_str) / 100)
+        end_minute = str.tonumber(end_time_str) % 100
+        
+        target_start_hour = base_start_hour + crypto_timezone_offset
+        target_end_hour = base_end_hour + crypto_timezone_offset
+        
+        while target_start_hour < 0
+            target_start_hour := target_start_hour + 24
+        while target_start_hour >= 24
+            target_start_hour := target_start_hour - 24
+        while target_end_hour < 0
+            target_end_hour := target_end_hour + 24  
+        while target_end_hour >= 24
+            target_end_hour := target_end_hour - 24
+        
+        current_hour = hour(time)
+        current_minute = minute(time)
+        
+        start_minutes = target_start_hour * 60 + start_minute
+        end_minutes = target_end_hour * 60 + end_minute
+        current_minutes = current_hour * 60 + current_minute
+        
+        if end_minutes < start_minutes
+            current_minutes >= start_minutes or current_minutes <= end_minutes
+        else
+            current_minutes >= start_minutes and current_minutes <= end_minutes
+    else
+        not na(time(timeframe.period, session_str))
+
+// NEW: Track first price for buy and hold calculation
+if bar_index == 0
+    first_price := open
+
+// Calculate buy and hold return
+if not na(first_price) and barstate.islast
+    buy_hold_return := ((close - first_price) / first_price) * 100
+
+// Run all 13 time window calculations concurrently
+var array<float> window_start_prices = array.new_float(13, na)
+var array<float> cumulative_values = array.new_float(13, 1.0)  // Start at normalized value of 1
+var array<float> daily_window_changes = array.new_float(13, 0.0)
+var array<bool> was_in_windows = array.new_bool(13, false)
+
+// Check each of the 13 time windows for the current bar
+for block_num = 0 to 12
+    session_str = array.get(block_sessions, block_num)
+    in_window = is_in_specific_window(session_str)
+    was_in_window = array.get(was_in_windows, block_num)
+    
+    // Detect window start and end
+    window_started = in_window and not was_in_window
+    window_ended = not in_window and was_in_window
+    
+    // When window starts, record the starting price
+    if window_started
+        array.set(window_start_prices, block_num, open)
+        array.set(daily_window_changes, block_num, 0.0)
+    
+    // During the window, calculate current day's percentage change
+    window_start_price = array.get(window_start_prices, block_num)
+    if in_window and not na(window_start_price)
+        daily_change = ((close - window_start_price) / window_start_price) * 100
+        array.set(daily_window_changes, block_num, daily_change)
+    
+    // When window ends, compound the performance into cumulative value
+    daily_change = array.get(daily_window_changes, block_num)
+    if window_ended and not na(window_start_price) and not na(daily_change)
+        // Convert percentage to multiplier and compound
+        daily_multiplier = 1 + (daily_change / 100)
+        current_cumulative = array.get(cumulative_values, block_num)
+        array.set(cumulative_values, block_num, current_cumulative * daily_multiplier)
+        
+        // Store the daily change for statistics using the appropriate block array
+        block_changes = get_block_changes_array(block_num)
+        array.push(block_changes, math.round(daily_change, 3))
+    
+    // Update window state
+    array.set(was_in_windows, block_num, in_window)
+
+// Calculate final results and find the best window
+if auto_optimize and barstate.islast and not optimization_complete
+    array.clear(all_block_results)
+    array.clear(all_block_bar_counts)
+    
+    best_average_return := -999999.0
+    best_block_number := 1
+    
+    for block_num = 0 to 12
+        block_changes = get_block_changes_array(block_num)
+        bar_count = array.size(block_changes)
+        avg_return = bar_count > 0 ? math.round(array.avg(block_changes), 3) : 0.0
+        
+        array.push(all_block_results, avg_return)
+        array.push(all_block_bar_counts, bar_count)
+        
+        if best_average_return == -999999.0 or avg_return > best_average_return
+            best_average_return := avg_return
+            best_block_number := block_num + 1
+            best_window := array.get(block_sessions, block_num)
+    
+    optimization_complete := true
+
+// Fallback for insufficient data
+if auto_optimize and not optimization_complete and bar_index <= 100
+    best_window := "0930-1000"
+    best_average_return := 0.0
+    best_block_number := 1
+    // Fill arrays with zeros for debugging
+    array.clear(all_block_results)
+    array.clear(all_block_bar_counts)
+    for i = 1 to 13
+        array.push(all_block_results, 0.0)
+        array.push(all_block_bar_counts, 0)
+    optimization_complete := true
+
+// Determine if current bar is bullish or bearish
+is_bullish = close > open
+is_bearish = close < open
+
+// Determine if we're in the time window (either manual selection or best auto-optimized window)
+in_window = if auto_optimize
+    // When auto-optimizing, only highlight the best performing window
+    best_session = array.get(block_sessions, best_performing_block)
+    is_in_specific_window(best_session)
+else
+    // When not auto-optimizing, use manual selection
+    is_in_time_window()
+
+// Set bar/candle color based on conditions
+bar_color = if in_window
+    if is_bullish
+        bullish_window_color
+    else if is_bearish
+        bearish_window_color
+    else
+        na  // doji bars keep default color
+else
+    na  // Outside window, keep default colors
+
+// Apply coloring based on chart type selection
+// For candle charts: always apply bar coloring (works for any candle/bar chart type)
+barcolor(chart_type == "Candles" ? bar_color : na)
+
+// Color the entire candle (body + wicks) when in candle mode and in time window
+plotcandle(open, high, low, close, 
+           color = chart_type == "Candles" and in_window and not na(bar_color) ? bar_color : na,
+           wickcolor = chart_type == "Candles" and in_window and not na(bar_color) ? bar_color : na,
+           bordercolor = chart_type == "Candles" and in_window and not na(bar_color) ? bar_color : na,
+           title = "Candle", force_overlay = true)
+
+// For line charts: plot colored line
+line_color = chart_type == "Line" and in_window ? line_color_input : na
+plot(close, color=line_color, linewidth=2, title="Line", force_overlay = true)
+
+// Optional background highlight
+bgcolor(show_background and in_window ? bg_color : na, force_overlay = true)
+
+// Track window sessions and calculate cumulative performance
+var float window_start_price = na
+var float cumulative_value = 1.0  // Start at normalized value of 1
+var float daily_window_change = 0.0
+var bool was_in_window = false
+var bool first_window_ever = true
+
+// Arrays to track all daily changes for statistics
+var array<float> daily_changes = array.new<float>()
+
+// Detect window start and end
+window_started = in_window and not was_in_window
+window_ended = not in_window and was_in_window
+
+// When window starts, record the starting price
+if window_started
+    window_start_price := open
+    daily_window_change := 0.0
+
+// During the window, calculate current day's percentage change
+if in_window and not na(window_start_price)
+    daily_window_change := ((close - window_start_price) / window_start_price) * 100
+
+// When window ends, compound the performance into cumulative value
+if window_ended and not na(window_start_price) and not na(daily_window_change)
+    // Convert percentage to multiplier and compound
+    daily_multiplier = 1 + (daily_window_change / 100)
+    cumulative_value := cumulative_value * daily_multiplier
+    
+    // Store the daily change for statistics (rounded to 3 decimal places)
+    array.push(daily_changes, math.round(daily_window_change, 3))
+    
+    first_window_ever := false
+
+// Update window state
+was_in_window := in_window
+
+// Calculate statistics (ensure 3 decimal places)
+total_windows = array.size(daily_changes)
+average_daily_change = total_windows > 0 ? math.round(array.avg(daily_changes), 3) : 0.0
+
+// NEW: Calculate win rate (percentage of profitable days)
+calculate_win_rate(changes_array) =>
+    if array.size(changes_array) == 0
+        0.0
+    else
+        profitable_days = 0
+        total_days = array.size(changes_array)
+        for i = 0 to total_days - 1
+            if array.get(changes_array, i) > 0
+                profitable_days += 1
+        math.round((profitable_days / total_days) * 100, 1)
+
+// Determine what value to plot
+plot_value = if in_window and not na(window_start_price) and not na(daily_window_change)
+    // During window: show what cumulative value WOULD be if window ended now
+    temp_multiplier = 1 + (daily_window_change / 100)
+    cumulative_value * temp_multiplier
+else
+    // Outside window: show current cumulative value
+    cumulative_value
+
+// Calculate cumulative returns for each block and find the best one (recalculate frequently)
+if auto_optimize and (bar_index % 50 == 0 or barstate.islast)  // Check every 50 bars and on last bar
+    highest_cumulative_return := -999999.0
+    best_performing_block := 0
+    
+    for i = 0 to 12
+        cumulative_return = array.get(cumulative_values, i)
+        
+        if cumulative_return > highest_cumulative_return
+            highest_cumulative_return := cumulative_return
+            best_performing_block := i
+    
+    // Set the best block details
+    block_times = array.from("09:30-10:00", "10:00-10:30", "10:30-11:00", "11:00-11:30", "11:30-12:00", 
+                             "12:00-12:30", "12:30-13:00", "13:00-13:30", "13:30-14:00", "14:00-14:30", 
+                             "14:30-15:00", "15:00-15:30", "15:30-16:00")
+    
+    block_colors = array.from(color.red, color.orange, color.yellow, color.lime, color.green, 
+                             color.teal, color.aqua, color.blue, color.navy, color.purple, 
+                             color.fuchsia, color.maroon, color.olive)
+    
+    best_block_time := array.get(block_times, best_performing_block)
+    best_block_color := array.get(block_colors, best_performing_block)
+
+// Plot the cumulative performance value for the main selected window (only if auto_optimize is disabled)
+plot(not auto_optimize ? plot_value : na, title="Performance", color=plot_value >= 1.0 ? color.green : color.red, linewidth=3)
+
+// FIXED: Show all 13 lines only when both auto-optimize AND show_all_lines are enabled
+// ALL 13 LINES (only visible when both toggles are enabled)
+plot_value_0 = auto_optimize and show_all_lines ? array.get(cumulative_values, 0) : na
+plot_value_1 = auto_optimize and show_all_lines ? array.get(cumulative_values, 1) : na
+plot_value_2 = auto_optimize and show_all_lines ? array.get(cumulative_values, 2) : na
+plot_value_3 = auto_optimize and show_all_lines ? array.get(cumulative_values, 3) : na
+plot_value_4 = auto_optimize and show_all_lines ? array.get(cumulative_values, 4) : na
+plot_value_5 = auto_optimize and show_all_lines ? array.get(cumulative_values, 5) : na
+plot_value_6 = auto_optimize and show_all_lines ? array.get(cumulative_values, 6) : na
+plot_value_7 = auto_optimize and show_all_lines ? array.get(cumulative_values, 7) : na
+plot_value_8 = auto_optimize and show_all_lines ? array.get(cumulative_values, 8) : na
+plot_value_9 = auto_optimize and show_all_lines ? array.get(cumulative_values, 9) : na
+plot_value_10 = auto_optimize and show_all_lines ? array.get(cumulative_values, 10) : na
+plot_value_11 = auto_optimize and show_all_lines ? array.get(cumulative_values, 11) : na
+plot_value_12 = auto_optimize and show_all_lines ? array.get(cumulative_values, 12) : na
+
+// Plot all 13 lines only when both auto-optimize AND show_all_lines are enabled
+plot(plot_value_0, title="09:30-10:00", color=auto_optimize and show_all_lines ? (best_performing_block == 0 ? best_line_color_input : (plot_value_0 > 1 ? color.green : plot_value_0 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_1, title="10:00-10:30", color=auto_optimize and show_all_lines ? (best_performing_block == 1 ? best_line_color_input : (plot_value_1 > 1 ? color.green : plot_value_1 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_2, title="10:30-11:00", color=auto_optimize and show_all_lines ? (best_performing_block == 2 ? best_line_color_input : (plot_value_2 > 1 ? color.green : plot_value_2 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_3, title="11:00-11:30", color=auto_optimize and show_all_lines ? (best_performing_block == 3 ? best_line_color_input : (plot_value_3 > 1 ? color.green : plot_value_3 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_4, title="11:30-12:00", color=auto_optimize and show_all_lines ? (best_performing_block == 4 ? best_line_color_input : (plot_value_4 > 1 ? color.green : plot_value_4 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_5, title="12:00-12:30", color=auto_optimize and show_all_lines ? (best_performing_block == 5 ? best_line_color_input : (plot_value_5 > 1 ? color.green : plot_value_5 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_6, title="12:30-13:00", color=auto_optimize and show_all_lines ? (best_performing_block == 6 ? best_line_color_input : (plot_value_6 > 1 ? color.green : plot_value_6 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_7, title="13:00-13:30", color=auto_optimize and show_all_lines ? (best_performing_block == 7 ? best_line_color_input : (plot_value_7 > 1 ? color.green : plot_value_7 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_8, title="13:30-14:00", color=auto_optimize and show_all_lines ? (best_performing_block == 8 ? best_line_color_input : (plot_value_8 > 1 ? color.green : plot_value_8 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_9, title="14:00-14:30", color=auto_optimize and show_all_lines ? (best_performing_block == 9 ? best_line_color_input : (plot_value_9 > 1 ? color.green : plot_value_9 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_10, title="14:30-15:00", color=auto_optimize and show_all_lines ? (best_performing_block == 10 ? best_line_color_input : (plot_value_10 > 1 ? color.green : plot_value_10 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_11, title="15:00-15:30", color=auto_optimize and show_all_lines ? (best_performing_block == 11 ? best_line_color_input : (plot_value_11 > 1 ? color.green : plot_value_11 < 1 ? color.red : color.gray)) : na, linewidth=1)
+plot(plot_value_12, title="15:30-16:00", color=auto_optimize and show_all_lines ? (best_performing_block == 12 ? best_line_color_input : (plot_value_12 > 1 ? color.green : plot_value_12 < 1 ? color.red : color.gray)) : na, linewidth=1)
+
+// Plot the best performing line with thick linewidth (always show when auto-optimize is enabled)
+best_plot_value_thick = auto_optimize ? array.get(cumulative_values, best_performing_block) : na
+plot(best_plot_value_thick, title="BEST Period", color=auto_optimize ? best_line_color_input : na, linewidth=3)
+
+// Add baseline reference line at 1.0
+//hline(1.0, "Baseline (Start)", color=color.gray, linestyle=hline.style_dashed)
+
+if show_table and barstate.islast
+    // Create table with different content based on auto_optimize setting
+    table_rows = auto_optimize ? 5 : 6  // More rows for new metrics
+    var table info_table = table.new(
+         position = table_position == "top_left" ? position.top_left : 
+         table_position == "top_center" ? position.top_center :
+         table_position == "top_right" ? position.top_right :
+         table_position == "middle_left" ? position.middle_left :
+         table_position == "middle_center" ? position.middle_center :
+         table_position == "middle_right" ? position.middle_right :
+         table_position == "bottom_left" ? position.bottom_left :
+         table_position == "bottom_center" ? position.bottom_center :
+         position.bottom_right,
+         columns = 3,
+         rows = table_rows,
+         bgcolor = color.new(color.white, 20),
+         border_width = 1
+     )
+    
+    // Clear table first
+    table.clear(info_table, 0, 0, 2, table_rows - 1)
+    
+    // Add headers
+    table.cell(info_table, 0, 0, "Mode", text_color=color.black, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(info_table, 1, 0, "Time Period", text_color=color.black, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    table.cell(info_table, 2, 0, "Avg Daily %", text_color=color.black, bgcolor=color.new(color.gray, 70), text_size=size.small)
+    
+    if auto_optimize
+        // Show only the best performing block when auto_optimize is enabled (based on cumulative return)
+        best_block_changes = get_block_changes_array(best_performing_block)
+        best_trade_count = array.size(best_block_changes)
+        best_avg_return = best_trade_count > 0 ? math.round(array.avg(best_block_changes), 3) : 0.0
+        best_avg_return_str = str.tostring(best_avg_return, "#.###") + "%"
+        best_return_color = best_avg_return >= 0 ? color.green : color.red
+        
+        // Get cumulative return for the best block (this is what we're optimizing for)
+        best_cumulative_value = array.get(cumulative_values, best_performing_block)
+        best_cumulative_return_pct = math.round((best_cumulative_value - 1.0) * 100, 3)
+        best_cumulative_return_str = str.tostring(best_cumulative_return_pct, "#.###") + "%"
+        best_cumulative_color = best_cumulative_return_pct > 0 ? color.green : best_cumulative_return_pct < 0 ? color.red : color.gray
+        
+        // Calculate win rate for best block
+        best_win_rate = calculate_win_rate(best_block_changes)
+        best_win_rate_str = str.tostring(best_win_rate, "#.#") + "%"
+        best_win_rate_color = best_win_rate >= 50 ? color.green : color.red
+        
+        // Display best performing block (based on cumulative return)
+        table.cell(info_table, 0, 1, "🏆 AUTO OPTIMIZE", text_color=color.blue, bgcolor=color.new(color.yellow, 80), text_size=size.small)
+        table.cell(info_table, 1, 1, best_block_time, text_color=best_block_color, text_size=size.small)
+        table.cell(info_table, 2, 1, best_avg_return_str, text_color=best_return_color, text_size=size.small)
+        
+        // Add cumulative return row
+        table.cell(info_table, 0, 2, "📈 RETURN", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 1, 2, str.tostring(best_trade_count) + " days", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 2, 2, best_cumulative_return_str, text_color=best_cumulative_color, text_size=size.small)
+        
+        // Add win rate row
+        table.cell(info_table, 0, 3, "✅ WIN RATE", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 1, 3, "Profitable Days", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 2, 3, best_win_rate_str, text_color=best_win_rate_color, text_size=size.small)
+        
+        // Add buy and hold comparison row
+        buy_hold_str = str.tostring(math.round(buy_hold_return, 3), "#.###") + "%"
+        buy_hold_color = buy_hold_return > 0 ? color.green : buy_hold_return < 0 ? color.red : color.gray
+        outperformance = best_cumulative_return_pct - buy_hold_return
+        outperformance_str = (outperformance >= 0 ? "+" : "") + str.tostring(math.round(outperformance, 1), "#.#") + "%"
+        outperformance_color = outperformance > 0 ? color.green : outperformance < 0 ? color.red : color.gray
+        
+        table.cell(info_table, 0, 4, "📊 BUY & HOLD", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 1, 4, outperformance_str + " vs B&H", text_color=outperformance_color, text_size=size.small)
+        table.cell(info_table, 2, 4, buy_hold_str, text_color=buy_hold_color, text_size=size.small)
+    else
+        // Show manual selection when auto_optimize is disabled
+        avg_change_str = str.tostring(average_daily_change, "#.###") + "%"
+        avg_color = average_daily_change >= 0 ? color.green : color.red
+        main_trades = array.size(daily_changes)
+        
+        // Get cumulative return for manual selection
+        manual_cumulative_return_pct = math.round((cumulative_value - 1.0) * 100, 3)
+        manual_cumulative_return_str = str.tostring(manual_cumulative_return_pct, "#.###") + "%"
+        manual_cumulative_color = manual_cumulative_return_pct > 0 ? color.green : manual_cumulative_return_pct < 0 ? color.red : color.gray
+        
+        // Calculate win rate for manual selection
+        manual_win_rate = calculate_win_rate(daily_changes)
+        manual_win_rate_str = str.tostring(manual_win_rate, "#.#") + "%"
+        manual_win_rate_color = manual_win_rate >= 50 ? color.green : color.red
+        
+        table.cell(info_table, 0, 1, "📋 MANUAL", text_color=color.black, bgcolor=color.new(color.blue, 80), text_size=size.small)
+        table.cell(info_table, 1, 1, time_session, text_color=color.black, text_size=size.small)
+        table.cell(info_table, 2, 1, avg_change_str, text_color=avg_color, text_size=size.small)
+        
+        // Add cumulative return row
+        table.cell(info_table, 0, 2, "📈 RETURN", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 1, 2, str.tostring(main_trades) + " days", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 2, 2, manual_cumulative_return_str, text_color=manual_cumulative_color, text_size=size.small)
+        
+        // Add win rate row
+        table.cell(info_table, 0, 3, "✅ WIN RATE", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 1, 3, "Profitable Days", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 2, 3, manual_win_rate_str, text_color=manual_win_rate_color, text_size=size.small)
+        
+        // Add buy and hold comparison row
+        buy_hold_str = str.tostring(math.round(buy_hold_return, 3), "#.###") + "%"
+        buy_hold_color = buy_hold_return > 0 ? color.green : buy_hold_return < 0 ? color.red : color.gray
+        outperformance = manual_cumulative_return_pct - buy_hold_return
+        outperformance_str = (outperformance >= 0 ? "+" : "") + str.tostring(math.round(outperformance, 1), "#.#") + "%"
+        outperformance_color = outperformance > 0 ? color.green : outperformance < 0 ? color.red : color.gray
+        
+        table.cell(info_table, 0, 4, "📊 BUY & HOLD", text_color=color.black, text_size=size.small)
+        table.cell(info_table, 1, 4, outperformance_str + " vs B&H", text_color=outperformance_color, text_size=size.small)
+        table.cell(info_table, 2, 4, buy_hold_str, text_color=buy_hold_color, text_size=size.small)
+        
+        // Add suggestion to enable auto_optimize
+        table.cell(info_table, 0, 5, "💡 TIP - Enable", text_color=color.orange, text_size=size.small)
+        table.cell(info_table, 1, 5, "Auto-Optimize", text_color=color.orange, text_size=size.small)
+        table.cell(info_table, 2, 5, "for best window", text_color=color.orange, text_size=size.small)

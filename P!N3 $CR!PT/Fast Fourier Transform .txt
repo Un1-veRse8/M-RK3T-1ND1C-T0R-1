@@ -1,0 +1,40 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ScorsoneEnterprises
+
+//---------------------------------------------------------------------------------------------------------------------{
+//@version=6
+indicator("Fast Fourier Transform [ScorsoneEnterprises]", shorttitle = "SCE FFT")
+
+// input settings
+N = input.int(30, "Lookback value", minval=3, group = "Fourier Transform")
+pi = math.pi
+
+// FFT Function
+FFT() =>
+    fft_series = array.new<float>(0)
+    for k=0 to N-1 by 1
+        real_sum = 0.0
+        imag_sum = 0.0
+        for m=0 to N-1 by 1
+            theta = 2 * pi * k * m / N
+            exp_real = math.cos(theta)
+            exp_imag = -math.sin(theta)
+            real_input = math.log(close[m] / close[m+1])
+            real_sum := real_sum + real_input * exp_real
+            imag_sum := imag_sum + real_input * exp_imag
+        magnitude = math.sqrt(math.pow(real_sum, 2) + math.pow(imag_sum, 2))
+        array.push(fft_series, magnitude)
+    fft_series
+
+// get series
+fft_series = FFT()
+
+// Calculate rolling percentiles
+percentile_25 = array.percentile_linear_interpolation(fft_series, 25)
+percentile_75 = array.percentile_linear_interpolation(fft_series, 75)
+
+// plot lines for percentiles
+plot(fft_series.get(0), "FFT", color.teal, 2)
+plot(percentile_25, color=color.purple, title="25th Percentile", linewidth = 1)
+plot(percentile_75, color=color.red, title="75th Percentile", linewidth = 1)
+//---------------------------------------------------------------------------------------------------------------------}

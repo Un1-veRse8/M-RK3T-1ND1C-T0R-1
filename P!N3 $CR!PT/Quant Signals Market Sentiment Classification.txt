@@ -1,0 +1,238 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Faduzzle
+
+//@version=5
+indicator("Quant Signals: Market Sentiment Classification", overlay=false, max_bars_back=5000, max_lines_count=20, max_labels_count=50)
+
+// ========= Inputs =========
+win     = input.int(256, "Window (bars)", minval=64)
+skipExp = input.int(2, "Min scale exponent ji (skip small scales)", minval=1)
+resig   = input.float(0.035, "Regime-shift residual threshold", step=0.001)
+useLogP = input.bool(true, "Use log(price) as signal")
+plotSigmaAnnual = input.bool(false, "Plot σ annualized (approx)")
+
+// Regime thresholds
+h_trend = input.float(0.55, "H ≥ trend threshold", step=0.01)
+h_mean  = input.float(0.45, "H ≤ mean-revert threshold", step=0.01)
+
+// ========= HUD color/opacity settings =========
+hudBgColor   = input.color(color.black, "HUD Background")
+hudTextColor = input.color(color.white, "HUD Text")
+hudAlpha     = input.int(0, "HUD Background Opacity (0–100)", minval=0, maxval=100)
+
+trendColor   = input.color(color.green, "Trend Regime Color")
+meanRevColor = input.color(color.blue, "Mean-Revert Regime Color")
+neutralColor = input.color(color.orange, "Neutral Regime Color")
+shiftColor   = input.color(color.red, "Shift Alert Color")
+regAlpha     = input.int(0, "Regime Cell Opacity (0–100)", minval=0, maxval=100)
+
+// ========= Series prep =========
+src = useLogP ? math.log(close) : close
+
+// Rolling buffer of last 'win' samples
+var float[] buf = array.new_float()
+f_push(_x) =>
+    array.push(buf, _x)
+    if array.size(buf) > win
+        array.shift(buf)
+f_push(src)
+ready = array.size(buf) == win
+
+// ========= Helpers =========
+f_h_of_H(float H) =>
+    num = 1.0 - math.pow(2.0, -2.0*H)
+    den = (2.0*H + 2.0)*(2.0*H + 1.0)
+    den != 0 ? (num/den) : na
+
+// Weighted least squares on (x=j, y=log2(S_j)), weights w=1/j
+f_fit_H_sigma(float[] yvals, int ji, int je) =>
+    float Sw   = 0.0
+    float Swx  = 0.0
+    float Swy  = 0.0
+    float Swxx = 0.0
+    float Swxy = 0.0
+    for j = ji to je
+        y = array.get(yvals, j)
+        if not na(y)
+            w = 1.0 / j
+            x = j * 1.0
+            Sw   += w
+            Swx  += w * x
+            Swy  += w * y
+            Swxx += w * x * x
+            Swxy += w * x * y
+    float denom = Sw*Swxx - Swx*Swx
+    float p = denom != 0 ? (Sw*Swxy - Swx*Swy)/denom : na
+    float c = denom != 0 ? (Swy*Swxx - Swx*Swxy)/denom : na
+    float H = na(p) ? na : math.max(0.05, math.min(0.95, (p - 1.0)/2.0))
+    float hH = na(H) ? na : f_h_of_H(H)
+    float sigma = (na(c) or na(hH) or hH<=0) ? na : (math.pow(2.0, c/2.0) / math.sqrt(hH))
+    [H, sigma, p, c]
+
+// ===== Regime label & color (block style, no ternary line breaks) =====
+f_regime_text(float H, float resid, float thr, float ht, float hm) =>
+    string out = "n/a"
+    if not na(H)
+        if not na(resid) and resid > thr
+            out := "Behaviour changed — be cautious"
+        else if H >= ht
+            out := "Trending"
+        else if H <= hm
+            out := "Choppy"
+        else
+            out := "Neutral"
+    out
+
+f_regime_color(float H, float resid, float thr, float ht, float hm, color cTrend, color cMean, color cNeutral, color cShift, color cFallback) =>
+    color base = cFallback
+    if not na(H)
+        base := H >= ht ? cTrend : H <= hm ? cMean : cNeutral
+    (not na(resid) and resid > thr) ? cShift : base
+
+// ===== Plain‑English messages (block style where needed) =====
+f_arrow(float x) => x > 0 ? "↑" : x < 0 ? "↓" : "→"
+
+f_interp_H(float H, float dH, float ht, float hm) =>
+    string msg = "No reading"
+    if not na(H)
+        dir = f_arrow(dH)
+        if H >= ht
+            msg := "Market is trending — prices may keep moving in same direction (" + dir + ")"
+        else if H <= hm
+            msg := "Market is choppy — prices more likely to reverse (" + dir + ")"
+        else
+            msg := "Market is neutral — no clear edge (" + dir + ")"
+    msg
+
+f_fmt_sigma(float s, bool isAnnual, bool isLog) =>
+    na(s) ? "n/a" : (isAnnual and isLog ? str.tostring(s*100.0, format.mintick) + " %/yr" : (isLog ? str.tostring(s*100.0, format.mintick) + " % (per bar, log)" : str.tostring(s, format.mintick)))
+
+f_interp_sigma(float dSig) =>
+    dSig > 0 ? "Volatility increasing — expect larger swings" : dSig < 0 ? "Volatility decreasing — expect smaller swings" : "Volatility stable"
+
+f_interp_resid(float resid, float thr) =>
+    na(resid) ? "No reading" : (resid > thr ? "Market behaviour has changed — be cautious" : "Market behaviour is stable")
+
+f_overall_reco(float H, float resid, float ht, float hm, float thr) =>
+    string reco = "No recommendation"
+    if not na(H) and not na(resid)
+        if resid > thr
+            reco := "Avoid new trades until things settle"
+        else if H >= ht
+            reco := "Favour trades that follow the trend"
+        else if H <= hm
+            reco := "Favour trades that fade big moves"
+        else
+            reco := "Wait for a clearer opportunity"
+    reco
+
+// ========= Main estimation =========
+var float H_est = na
+var float sig_est = na
+var float fit_resid = na
+
+if ready
+    jeCalc = int(math.floor(math.log(win) / math.log(2.0)))
+    ji = math.min(skipExp, jeCalc)
+    je = jeCalc
+
+    float[] yvals = array.new_float(je+1, na)
+
+    for j = ji to je
+        scale = int(math.round(math.pow(2.0, j)))
+        half  = scale / 2
+        Nj    = win - scale + 1
+        float acc = 0.0
+        int   cnt = 0
+        if Nj > 0 and half > 0
+            for i = 0 to (Nj - 1)
+                float sumdiff = 0.0
+                for l = 0 to (half - 1)
+                    a = array.get(buf, i + l)
+                    b = array.get(buf, i + half + l)
+                    sumdiff += (a - b)
+                dj = sumdiff / math.sqrt(scale * 1.0)
+                acc += dj * dj
+                cnt += 1
+        Sj = cnt > 0 ? acc / cnt : na
+        y  = not na(Sj) and Sj > 0 ? (math.log(Sj)/math.log(2.0)) : na
+        array.set(yvals, j, y)
+
+    [Htmp, sigtmp, pHat, cHat] = f_fit_H_sigma(yvals, ji, je)
+    H_est   := Htmp
+    sig_est := sigtmp
+
+    float res = 0.0, W = 0.0
+    for j = ji to je
+        y = array.get(yvals, j)
+        if not na(y) and not na(cHat) and not na(pHat)
+            yhat = cHat + pHat * (j * 1.0)
+            w = 1.0 / j
+            res += w * math.pow(y - yhat, 2.0)
+            W   += w
+    fit_resid := W > 0 ? res / W : na
+
+// ========= Plots =========
+plot(H_est, title="Hurst H", color=color.new(color.teal, 0), linewidth=2)
+hline(0.5, "H=0.5", color=color.new(color.gray, 60))
+hline(0.6, "H≈0.6 (persistent)", color=color.new(color.green, 80))
+
+// Volatility plot (optionally annualised)
+sigmaToPlot = sig_est
+if plotSigmaAnnual and useLogP
+    tfSec = timeframe.in_seconds() * 1.0
+    tfSec := na(tfSec) or tfSec <= 0 ? 60.0 : tfSec
+    barsPerYear = 252.0 * (24.0*60.0*60.0 / tfSec)
+    sigmaToPlot := not na(sig_est) ? sig_est * math.sqrt(barsPerYear) : na
+plot(sigmaToPlot, title="σ", color=color.new(color.orange, 0), linewidth=2)
+
+// Regime-shift background when residual too large
+bgcolor(not na(fit_resid) and fit_resid > resig ? color.new(shiftColor, 90) : na)
+
+// ========= HUD (top-right table) with Recommendation column =========
+var table hud = table.new(position.top_right, 3, 6, border_width=1)
+
+// Deltas for arrows (safe when na)
+dH   = na(H_est[1]) ? 0.0 : (H_est - H_est[1])
+dSig = na(sigmaToPlot[1]) ? 0.0 : (sigmaToPlot - sigmaToPlot[1])
+
+if barstate.islast
+    // Header
+    table.cell(hud, 0, 0, "Metric",         text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 1, 0, "Value",          text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 2, 0, "Recommendation", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+
+    // H
+    table.cell(hud, 0, 1, "Hurst (H)", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 1, 1, na(H_est) ? "n/a" : str.tostring(H_est, format.mintick), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 2, 1, f_interp_H(H_est, dH, h_trend, h_mean), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+
+    // σ
+    table.cell(hud, 0, 2, "Volatility (σ)" + (plotSigmaAnnual and useLogP ? " (annualized)" : " (per bar)"), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 1, 2, f_fmt_sigma(sigmaToPlot, plotSigmaAnnual, useLogP), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 2, 2, f_interp_sigma(dSig), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+
+    // Residual
+    table.cell(hud, 0, 3, "Fit Residual", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 1, 3, na(fit_resid) ? "n/a" : str.tostring(fit_resid, format.mintick), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 2, 3, f_interp_resid(fit_resid, resig), text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+
+    // Regime (colored) + overall recommendation
+    regTxt = f_regime_text(H_est, fit_resid, resig, h_trend, h_mean)
+    regClr = f_regime_color(H_est, fit_resid, resig, h_trend, h_mean, trendColor, meanRevColor, neutralColor, shiftColor, hudBgColor)
+    table.cell(hud, 0, 4, "Regime", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 1, 4, regTxt, text_color=color.white, bgcolor=color.new(regClr, regAlpha))
+    table.cell(hud, 2, 4, f_overall_reco(H_est, fit_resid, h_trend, h_mean, resig), text_color=color.white, bgcolor=color.new(regClr, regAlpha))
+
+    // Footer
+    table.cell(hud, 0, 5, "Note", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 1, 5, "Context tool, not a signal", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+    table.cell(hud, 2, 5, "Tune thresholds per symbol", text_color=hudTextColor, bgcolor=color.new(hudBgColor, hudAlpha))
+
+// ========= Alerts =========
+alertcondition(ta.crossover(fit_resid, resig), "Regime Shift (Up)", "Scale-spectrum fit residual crossed ABOVE threshold")
+alertcondition(ta.crossunder(fit_resid, resig), "Regime Shift (Down)", "Scale-spectrum fit residual crossed BACK BELOW threshold")
+alertcondition(ta.crossover(H_est, 0.60), "H crossed 0.60", "Hurst exceeded ~0.60 (persistent regime)")
+alertcondition(ta.crossunder(H_est, 0.50), "H crossed 0.50", "Hurst fell below 0.50 (anti-persistent/near-diffusive)")
+
+

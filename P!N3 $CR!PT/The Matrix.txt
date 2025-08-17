@@ -1,0 +1,85 @@
+////////////////////////////////////////////////
+/////////////////// The Matrix /////////////////
+////////////////////////////////////////////////
+//
+// Take the red pill and see all the details and deep secrets of the market while you trade!!!
+//
+// Once you are experienced enough,,...
+// "you get used to it, you don't even see the code, All you see is blond, brunette, redhead" 😎
+//
+// Happy trading everyone and have fun with the new tables functions!!
+//
+//  Gr, JD.
+//
+//  #DefinitelyNotTradingAdvice :-)
+//
+//
+//@version=4
+study("'The Matrix'", overlay = true)
+
+Katakana_code = array.from(" ", " ", " ", " ", " ", " ", " " , " ", " " ," ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ",
+                          " ", " ", " ", " ", " ", " ", " " , " ", " " ," ", " ", " ", " ", " ", " ", " " ," ", " ", " ", " ", " ", " ", " ",
+                          " ", " ", " ", " ", " ", " ", " " , " ", " " ," ", " ", " ", " ", " ", " ", " " ," ", " ", " ", " ", " ", " ", " ",
+                          " ", " ", " ", " ", " ", " ", " " , " ", " " ," ", " ", " ", " ", " ", " ", " " ," ", " ", " ", " ", " ", " ", " ",
+                          " ", " ", " ", " ", " ", " ", " " , " ", " " ," ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ",
+                          " ", " ", " ", " ", " ", " ", " " , " ", " " ," ", " ", " ", " ", " ", " ", " " ," " ," ", " ", " ", " ", " ", " ",
+                          "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+                          "ァ", "ア", "ィ", "イ", "ゥ", "ウ", "ェ", " ", "エ", "ォ", "オ", "カ", "ガ", "キ", "ギ", "ク", "グ", "ケ", "ゲ",
+                          "コ", "ゴ", "サ","ザ", "シ", "ジ", " ", "ス", "ズ", "セ", "ゼ", "ソ", "ゾ", "タ", "ダ", "チ", "ヂ", "ッ", "ツ",
+                          " ", "ヅ", "テ", "デ", "ド", "ナ", "ニ", "ヌ", "ネ", "ノ", "ハ", "バ", "パ", "ヒ", "ビ", "ピ", "フ", "ブ", "プ",
+                          "ヘ", "ベ", "ペ", "ホ", "ボ", "ポ", "マ", "ミ", "ム", "メ", "モ",  "ャ", "ヤ", " ", "ュ", "ユ", "ョ", " ", "ヨ",
+                          "ラ", "リ", "ル", "レ", "ロ", "ヮ", "ワ", "ヰ", "ヱ", "ヲ", "ン", "ヴ", "ヵ", "ヶ", "ヷ", "ヸ", "ヹ", "ヺ")
+
+// Screen size adjustments //
+col_nr = input(50)
+row_nr = min(input(100), floor(9999 / col_nr))
+
+// Var initialisation //
+matrix_code = table.new("top_left", col_nr, row_nr, bgcolor = na)
+
+varip close_rt          = close
+varip top_row           = array.new_string(col_nr)
+varip top_row_prev      = array.new_string(col_nr)
+varip matrix_falloff    = array.new_string(col_nr * row_nr - 1)
+varip top_row_tr        = array.new_int(col_nr, 50)
+varip top_row_prev_tr   = array.new_int(col_nr, 50)
+varip matrix_falloff_tr = array.new_int(col_nr * row_nr - 1, 50)
+
+// Initialise Matrix code //
+if barstate.isfirst
+    for c = 0 to col_nr - 1
+        for r = 0 to row_nr - 1
+            table.cell(matrix_code, c, r, text = "", text_color = color.rgb(0, 255, 70, 50))
+
+// Calculate Matrix Code //    
+if barstate.islast
+    for c = 0 to col_nr - 1
+        index   = int(random(0, array.size(Katakana_code) - 1))
+        char    = array.get(Katakana_code, index)
+        transp  = int(random(0, 10)) > 8 ? 0 : 50
+        top_row_pr    = array.get(top_row,    c)
+        top_row_pr_tr = array.get(top_row_tr, c)
+        array.set(top_row,         c, char)
+        array.set(top_row_prev,    c, top_row_pr)
+        array.set(top_row_tr,      c, transp)
+        array.set(top_row_prev_tr, c, top_row_pr_tr)
+    
+    if change(close) != 0
+        for c = 0 to col_nr - 1
+            array.unshift(matrix_falloff, array.get(top_row_prev, c))
+            array.pop(    matrix_falloff)
+            array.unshift(matrix_falloff_tr, array.get(top_row_prev_tr, c))
+            array.pop(    matrix_falloff_tr)
+
+    for c = 0 to col_nr - 1
+        trans_top = array.get(top_row_tr, c)
+        table.cell_set_text_color(matrix_code, c, 0, text_color = color.rgb(0, 255, 70, trans_top))
+        table.cell_set_text_size( matrix_code, c, 0, text_size  = size.small)
+        table.cell_set_width(     matrix_code, c, 0, width      = 100 / col_nr)
+        table.cell_set_text(      matrix_code, c, 0, text       = array.get(top_row, c))
+        for r = 0 to row_nr - 2
+            trans_fall = array.get(matrix_falloff_tr, c + r * col_nr)
+            table.cell_set_text_color(matrix_code, c, r, text_color = color.rgb(0, 255, 70, trans_fall))
+            table.cell_set_text_size( matrix_code, c, r, text_size  = size.small)
+            table.cell_set_width(     matrix_code, c, r, width      = 100 / col_nr)
+            table.cell_set_text(      matrix_code, c, r, text       = array.get(matrix_falloff, c + r * col_nr))

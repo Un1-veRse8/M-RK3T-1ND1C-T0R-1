@@ -1,0 +1,183 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Goldman_Gleb
+
+
+//@version=5
+indicator("Cycle Phase & ETA Tracker [Robust v4]", shorttitle="Cycle ETA v4", overlay=false, max_lines_count=300, max_labels_count=300, max_boxes_count=50)
+
+// ==== Constants ====
+var float SCALE_FACTOR = 100.0  // Scaling factor for filtered signal
+var int MIN_CYCLE_COUNT = 3     // Minimum number of cycles for reliable metrics
+
+// ==== Inputs ====
+groupCore   = "Core Settings"
+trackCycles = input.int(20, "Track Last N Cycles", minval=MIN_CYCLE_COUNT, group=groupCore, tooltip="Number of recent cycles to track for average length calculation. Higher values provide more stable estimates but may lag behind market changes.")
+src         = input.source(close, "Source", group=groupCore, tooltip="Data source for cycle analysis (e.g., close, open, high). Default is closing price.")
+useAdaptive = input.bool(true, "Use Adaptive Cycle Length?", group=groupCore, tooltip="If enabled, cycle length adjusts based on timeframe (e.g., shorter for intraday, longer for daily). If disabled, uses Fixed Cycle Length.")
+fixedL      = input.int(14, "Fixed Cycle Length", minval=1, group=groupCore, tooltip="Cycle length (in bars) when adaptive length is disabled. Smaller values make the indicator more sensitive to short-term cycles.")
+showDebug   = input.bool(false, "Show Debug Histogram", group=groupCore, tooltip="Displays a histogram of the filtered signal for debugging. Useful for analyzing signal behavior.")
+
+groupLen    = "Cycle Length Estimation"
+avgMode     = input.string("Median (Robust)", "Average Mode", options=["Median (Robust)", "Weighted Mean", "Simple Mean"], group=groupLen, tooltip="Method to calculate average cycle length:\n- Median (Robust): Uses median, less sensitive to outliers.\n- Weighted Mean: Recent cycles have more influence.\n- Simple Mean: Equal weight for all cycles.")
+weightsStr  = input.string("linear", "Weights (for Weighted Mean)", options=["linear", "quadratic"], group=groupLen, tooltip="Weighting method for Weighted Mean:\n- Linear: Recent cycles have moderately higher weight (1, 2, 3, ...).\n- Quadratic: Recent cycles have significantly higher weight (1, 4, 9, ...).")
+
+groupETA    = "ETA Visualization"
+showETA     = input.bool(true, "Show ETA Line & Label", group=groupETA, tooltip="Displays a vertical line and label indicating the estimated time of the next cycle completion.")
+showBand    = input.bool(true, "Show ETA Confidence Band (±σ)", group=groupETA, tooltip="Shows a band around the ETA line based on standard deviation of cycle lengths, indicating uncertainty.")
+bandAlpha   = input.int(85, "Band Transparency (0..100)", minval=0, maxval=100, group=groupETA, tooltip="Transparency of the confidence band (0 = fully transparent, 100 = fully opaque).")
+etaColor    = input.color(color.orange, "ETA Color", group=groupETA, tooltip="Color for the ETA line, label, and confidence band.")
+
+// ==== Adaptive length by timeframe ====
+adaptiveLength = timeframe.isintraday and timeframe.multiplier <= 1  ? 10 :
+                 timeframe.isintraday and timeframe.multiplier <= 3  ? 12 :
+                 timeframe.isintraday and timeframe.multiplier <= 5  ? 14 :
+                 timeframe.isintraday and timeframe.multiplier <= 15 ? 18 :
+                 timeframe.isintraday and timeframe.multiplier <= 30 ? 21 :
+                 timeframe.isintraday and timeframe.multiplier <= 60 ? 34 :
+                 timeframe.isintraday and timeframe.multiplier <= 120 ? 45 :
+                 timeframe.isintraday and timeframe.multiplier <= 240 ? 55 :
+                 timeframe.isdaily                                    ? 89 :
+                 timeframe.isweekly                                   ? 144 :
+                 timeframe.ismonthly                                  ? 233 : 21
+
+L = useAdaptive ? adaptiveLength : fixedL
+L2 = math.max(1, math.round(L * 0.5))
+
+// ==== Core signal (detrend + double smooth) ====
+emaL  = ta.ema(src, L)
+detrend = src - emaL
+filtered = ta.ema(ta.ema(detrend, L2), L2) * SCALE_FACTOR
+
+// Optional debug histogram
+plot(showDebug ? filtered : na, title="hist_filtered (debug)", style=plot.style_histogram, color=color.new(color.blue, 0), linewidth=2)
+
+// ==== Zero-cross events ====
+zeroCross = ta.crossover(filtered, 0) or ta.crossunder(filtered, 0)
+
+// ==== Cycle length storage and metrics ====
+var int   lastIdx = na
+var float[] lens  = array.new_float(0)
+var float avgLen  = na
+var float stdLen  = na
+var float sumLens = 0.0  // Running sum for Simple Mean
+var float sumSquares = 0.0  // Running sum of squares for standard deviation
+
+// Helper: recompute metrics (incremental for Simple Mean, full for others)
+f_recompute_metrics(_arr) =>
+    var float _avg = na
+    var float _std = na
+    sz = array.size(_arr)
+    if sz >= MIN_CYCLE_COUNT
+        if avgMode == "Simple Mean"
+            _avg := sumLens / sz
+        else if avgMode == "Median (Robust)"
+            // Copy & sort to keep original
+            tmp = array.new_float(sz)
+            for i = 0 to sz - 1
+                array.set(tmp, i, array.get(_arr, i))
+            array.sort(tmp, order.ascending)
+            mid = sz / 2
+            _avg := (sz % 2 == 1) ? array.get(tmp, mid) : (array.get(tmp, mid-1) + array.get(tmp, mid)) / 2.0
+        else
+            // Weighted Mean (recent cycles weigh more)
+            wsum = 0.0
+            ssum = 0.0
+            for i = 0 to sz - 1
+                val = array.get(_arr, i)
+                w = (weightsStr == "quadratic") ? math.pow(i + 1.0, 2.0) : (i + 1.0)
+                ssum += val * w
+                wsum += w
+            _avg := ssum / wsum
+        // Standard deviation (w.r.t. chosen _avg)
+        if sz > 1
+            s2 = avgMode == "Simple Mean" ? sumSquares : 0.0
+            if avgMode != "Simple Mean"
+                for i = 0 to sz - 1
+                    v = array.get(_arr, i)
+                    s2 += math.pow(v - _avg, 2.0)
+            _std := math.sqrt(s2 / (sz - 1))
+        else
+            _std := 0.0
+    else
+        // Not enough cycles for reliable metrics
+        _avg := na
+        _std := na
+    [_avg, _std]
+
+// ==== Update cycle lengths on zero cross ====
+if zeroCross
+    if not na(lastIdx)
+        seg = float(bar_index - lastIdx)
+        array.push(lens, seg)
+        if avgMode == "Simple Mean"
+            sumLens := sumLens + seg
+            sumSquares := sumSquares + math.pow(seg, 2.0)
+        if array.size(lens) > trackCycles
+            oldSeg = array.shift(lens)
+            if avgMode == "Simple Mean"
+                sumLens := sumLens - oldSeg
+                sumSquares := sumSquares - math.pow(oldSeg, 2.0)
+        [newAvgLen, newStdLen] = f_recompute_metrics(lens)
+        avgLen := newAvgLen
+        stdLen := newStdLen
+    lastIdx := bar_index
+
+// ==== Phase (0..100) ====
+barsSince = not na(lastIdx) ? (bar_index - lastIdx) : na
+phase = (not na(barsSince) and not na(avgLen) and avgLen > 0) ? (barsSince / avgLen) * 100.0 : na
+
+// ==== Background by phase zones ====
+bgcolor(phase <= 33 ? color.new(color.green, 90) : phase <= 66 ? color.new(color.blue, 90) : phase > 66 ? color.new(color.orange, 90) : na)
+
+// ==== Phase plot ====
+plot(phase, title="Phase %", color=phase > 66 ? color.new(color.orange, 0) : phase > 33 ? color.new(color.blue, 0) : color.new(color.green, 0), linewidth=2)
+
+// ==== ETA drawing ====
+var line  etaLine  = na
+var label etaLabel = na
+var box   etaBand  = na
+
+// Seconds per bar for time projection
+secPerBar = timeframe.in_seconds(timeframe.period)
+
+// Draw or update ETA if we have average
+if showETA and not na(avgLen) and avgLen > 0
+    etaBars  = math.round(avgLen)
+    etaIndex = bar_index + etaBars
+    etaTime  = time + etaBars * secPerBar * 1000
+
+    // Update or create ETA line
+    if not na(etaLine)
+        line.set_xy1(etaLine, etaIndex, 0)
+        line.set_xy2(etaLine, etaIndex, 100)
+    else
+        etaLine := line.new(x1=etaIndex, y1=0, x2=etaIndex, y2=100, xloc=xloc.bar_index, extend=extend.both, color=etaColor, style=line.style_dashed, width=2)
+
+    // Update or create ETA label
+    if not na(etaLabel)
+        label.set_xy(etaLabel, etaIndex, 50)
+        label.set_text(etaLabel, str.format("{0,date,dd MMM yyyy}", etaTime))
+    else
+        etaLabel := label.new(x=etaIndex, y=50, xloc=xloc.bar_index, yloc=yloc.price, text=str.format("{0,date,dd MMM yyyy}", etaTime), style=label.style_label_center, textcolor=color.white, size=size.small, color=etaColor)
+
+    // Update or create confidence band ±σ
+    if showBand and not na(stdLen) and stdLen > 0
+        leftIdx  = int(math.round(etaIndex - stdLen))
+        rightIdx = int(math.round(etaIndex + stdLen))
+        if not na(etaBand)
+            box.set_lefttop(etaBand, leftIdx, 100)
+            box.set_rightbottom(etaBand, rightIdx, 0)
+        else
+            etaBand := box.new(left=leftIdx, top=100, right=rightIdx, bottom=0, xloc=xloc.bar_index, bgcolor=color.new(etaColor, bandAlpha), border_color=color.new(etaColor, 0))
+else
+    // Clear visuals if no valid ETA
+    line.delete(etaLine)
+    label.delete(etaLabel)
+    box.delete(etaBand)
+    etaLine := na
+    etaLabel := na
+    etaBand := na
+
+// Warn if insufficient cycles
+if showETA and array.size(lens) < MIN_CYCLE_COUNT and array.size(lens) > 0
+    label.new(bar_index, 50, "Insufficient cycles for ETA", style=label.style_label_down, color=color.new(color.red, 50), textcolor=color.white, size=size.tiny)

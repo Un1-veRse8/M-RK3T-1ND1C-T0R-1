@@ -1,0 +1,698 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © traderprimez
+
+//@version=5
+indicator("Daily Range Probability Dashboard", "Daily Ran. Prob.%", overlay=true)
+
+//  |-----------------------------------------------------------------------------|
+//  |     ©traderprimez                                            |
+//  |     Indicator: Daily Amplitude Cumulative Probability                       |
+//  |     Description: This indicator calculates the probability that a daily     |
+//  |                  candle's amplitude will AT LEAST REACH a certain level.    |
+//  |                  It now also highlights the bin that the current, live day's|
+//  |                  amplitude falls into with a color and an arrow.            |
+//  |-----------------------------------------------------------------------------|
+
+
+//  =================================================================================
+//                                     INPUTS
+//  =================================================================================
+var G_VISUALS = "Display Settings"
+i_table_pos = input.string("top_right", "Dashboard Position", options=["top_right", "top_left", "middle_right", "middle_left", "bottom_right", "bottom_left"], group=G_VISUALS, tooltip="Position of the dashboard on the chart.")
+i_table_text_size = input.string("Normal", "Dashboard Text Size", options=["Tiny", "Small", "Normal", "Large", "Huge"], group=G_VISUALS, tooltip="Controls the font size of the text in the table.")
+i_show_zones = input.bool(true, "Show Daily Zones", group=G_VISUALS, tooltip="If checked, draws Manipulation and Distribution zones. Only appears on intraday timeframes.")
+i_lookback_draw_days = input.int(5, "Historical Zones to Draw", minval=0, group=G_VISUALS, tooltip="Limits how many past days have their zones drawn. Set to 0 to hide all historical zones.")
+
+var G_SETTINGS = "Calculation Settings"
+i_max_days = input.int(2000, "Max Historical Days to Analyze", minval=10, group=G_SETTINGS, tooltip="Limits the number of historical daily candles to analyze.")
+
+
+// =================================================================================
+//                                 DEFINITIONS & SETUP
+// =================================================================================
+var float[] BIN_THRESHOLDS = array.from(0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0)
+
+var int[] bin_counts = array.new_int(array.size(BIN_THRESHOLDS) + 1, 0)
+var int total_days_counted = 0
+var int live_bin_index = -1
+
+// --- Colors for Zones ---
+color MANIPULATION_COLOR_BULLISH = color.new(#024040, 80) // Bear trap
+color DISTRIBUTION_COLOR_BULLISH = color.new(#B9D989, 80) // Main move up
+color MANIPULATION_COLOR_BEARISH = color.new(#B9D989, 80) // Bull trap
+color DISTRIBUTION_COLOR_BEARISH = color.new(#024040, 80) // Main move down
+
+// --- Persistent Drawing Objects for the LIVE day ---
+var box live_manip_box = na
+var box live_dist_box = na
+var label live_amp_label = na
+
+
+// =================================================================================
+//                                 HELPER FUNCTIONS
+// =================================================================================
+f_getTablePosition(pos_str) =>
+    switch pos_str
+        "top_right"     => position.top_right
+        "top_left"      => position.top_left
+        "middle_right"  => position.middle_right
+        "middle_left"   => position.middle_left
+        "bottom_right"  => position.bottom_right
+        "bottom_left"   => position.bottom_left
+
+f_getTextSize(size_str) =>
+    switch size_str
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        => size.small
+
+
+// =================================================================================
+//                                 CORE CALCULATION
+// =================================================================================
+[d_open, d_high, d_low, d_time, d_time_close] = request.security(syminfo.tickerid, "D", [open, high, low, time, time_close], lookahead=barmerge.lookahead_on)
+
+is_new_day = ta.change(time("D"))
+if is_new_day and total_days_counted < i_max_days and bar_index > 1
+    total_days_counted += 1
+    float prev_day_open = d_open[1]
+    float prev_day_high = d_high[1]
+    float prev_day_low  = d_low[1]
+
+    if prev_day_open > 0
+        float amplitude_pct = (prev_day_high - prev_day_low) / prev_day_open * 100
+        bool binned = false
+        for i = 0 to array.size(BIN_THRESHOLDS) - 1
+            if amplitude_pct < array.get(BIN_THRESHOLDS, i)
+                array.set(bin_counts, i, array.get(bin_counts, i) + 1)
+                binned := true
+                break
+        if not binned
+            array.set(bin_counts, array.size(bin_counts) - 1, array.get(bin_counts, array.size(bin_counts) - 1) + 1)
+
+        if i_show_zones and timeframe.isintraday and total_days_counted <= i_lookback_draw_days
+            float excursion_up = prev_day_high - prev_day_open
+            float excursion_down = prev_day_open - prev_day_low
+            if prev_day_high > prev_day_low
+                float manip_top = na, float manip_bottom = na, float dist_top = na, float dist_bottom = na, float label_y_pos = na
+                color manip_color = na, color dist_color = na
+                string label_style = na
+
+                // --- CORRECTED: Individual assignments per line ---
+                if excursion_up > excursion_down // Bullish Day
+                    manip_top := prev_day_open
+                    manip_bottom := prev_day_low
+                    manip_color := MANIPULATION_COLOR_BULLISH
+                    dist_top := prev_day_high
+                    dist_bottom := prev_day_open
+                    dist_color := DISTRIBUTION_COLOR_BULLISH
+                    label_y_pos := prev_day_low
+                    label_style := label.style_label_up
+                else // Bearish Day
+                    manip_top := prev_day_high
+                    manip_bottom := prev_day_open
+                    manip_color := MANIPULATION_COLOR_BEARISH
+                    dist_top := prev_day_open
+                    dist_bottom := prev_day_low
+                    dist_color := DISTRIBUTION_COLOR_BEARISH
+                    label_y_pos := prev_day_high
+                    label_style := label.style_label_down
+                
+                box.new(d_time[1], manip_top, d_time_close[1], manip_bottom, xloc=xloc.bar_time, border_color=na, bgcolor=manip_color)
+                box.new(d_time[1], dist_top, d_time_close[1], dist_bottom, xloc=xloc.bar_time, border_color=na, bgcolor=dist_color)
+                
+                string label_text = "Range: " + str.tostring(amplitude_pct, "#.##") + "%"
+                int center_time_hist = (d_time[1] + d_time_close[1]) / 2
+                label.new(center_time_hist, label_y_pos, label_text, xloc=xloc.bar_time, style=label_style, textcolor=color.black, color=color.new(color.gray, 100), text_font_family=font.family_monospace, size=size.tiny)
+
+if d_open > 0
+    float live_amplitude_pct = (d_high - d_low) / d_open * 100
+    bool live_binned = false
+    for i = 0 to array.size(BIN_THRESHOLDS) - 1
+        if live_amplitude_pct < array.get(BIN_THRESHOLDS, i)
+            live_bin_index := i
+            live_binned := true
+            break
+    if not live_binned
+        live_bin_index := array.size(bin_counts) - 1
+
+// =================================================================================
+//                           LIVE ZONE & LABEL VISUALIZATION
+// =================================================================================
+if i_show_zones and timeframe.isintraday and not na(d_open)
+    box.delete(live_manip_box), box.delete(live_dist_box), label.delete(live_amp_label)
+
+    float excursion_up = d_high - d_open
+    float excursion_down = d_open - d_low
+    if d_high > d_low
+        float manip_top = na, float manip_bottom = na, float dist_top = na, float dist_bottom = na, float label_y_pos = na
+        color manip_color = na, color dist_color = na
+        string label_style = na
+
+        // --- CORRECTED: Individual assignments per line ---
+        if excursion_up > excursion_down // Bullish Day
+            manip_top := d_open
+            manip_bottom := d_low
+            manip_color := MANIPULATION_COLOR_BULLISH
+            dist_top := d_high
+            dist_bottom := d_open
+            dist_color := DISTRIBUTION_COLOR_BULLISH
+            label_y_pos := d_low
+            label_style := label.style_label_up
+        else // Bearish Day
+            manip_top := d_high
+            manip_bottom := d_open
+            manip_color := MANIPULATION_COLOR_BEARISH
+            dist_top := d_open
+            dist_bottom := d_low
+            dist_color := DISTRIBUTION_COLOR_BEARISH
+            label_y_pos := d_high
+            label_style := label.style_label_down
+
+        live_manip_box := box.new(d_time, manip_top, time, manip_bottom, xloc=xloc.bar_time, border_color=na, bgcolor=manip_color)
+        live_dist_box := box.new(d_time, dist_top, time, dist_bottom, xloc=xloc.bar_time, border_color=na, bgcolor=dist_color)
+        
+        float total_amp_pct = (d_high - d_low) / d_open * 100
+        string label_text = "Total Range: " + str.tostring(total_amp_pct, "#.##") + "%"
+        
+        int center_time = (d_time + time) / 2
+        live_amp_label := label.new(center_time, label_y_pos, label_text, xloc=xloc.bar_time, style=label_style, textcolor=color.black, color=color.new(color.gray, 100), text_font_family=font.family_monospace, size=size.small)
+
+// =================================================================================
+//                                 DASHBOARD DISPLAY
+// =================================================================================
+if barstate.islast
+    var table dashboard = table.new(position.top_right, 1, 1)
+    table.delete(dashboard)
+    dashboard := table.new(f_getTablePosition(i_table_pos), 4, array.size(bin_counts) + 3, border_width=1)
+    string table_text_size = f_getTextSize(i_table_text_size)
+    var int[] cumulative_counts = array.new_int(array.size(bin_counts), 0)
+    int cumulative_sum = 0
+    for i = array.size(bin_counts) - 1 to 0
+        cumulative_sum += array.get(bin_counts, i)
+        array.set(cumulative_counts, i, cumulative_sum)
+    color header_color    = color.new(#024040, 85), color even_row_color  = color.new(color.gray, 95)
+    color odd_row_color   = color.new(color.gray, 90), color highlight_color = color.new(#024040, 80)
+    table.merge_cells(dashboard, 0, 0, 2, 0)
+    table.cell(dashboard, 0, 0, "Daily Range Prob. by @traderprimez", text_halign=text.align_center, bgcolor=color.new(#024040, 20), text_color=color.white, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 3, 0, syminfo.ticker, text_halign=text.align_center, bgcolor=color.new(#024040, 20), text_color=color.white, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 0, 1, "", text_halign=text.align_center, bgcolor=header_color)
+    table.cell(dashboard, 1, 1, "Amplitude Level", text_halign=text.align_center, bgcolor=header_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 2, 1, "Days Reaching Level", text_halign=text.align_center, bgcolor=header_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 3, 1, "Prob. of Reaching Level (%)", text_halign=text.align_center, bgcolor=header_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+    for i = 0 to array.size(cumulative_counts) - 1
+        int count = array.get(cumulative_counts, i)
+        float probability = total_days_counted > 0 ? (count / float(total_days_counted)) * 100 : 0
+        color row_color = i == live_bin_index ? highlight_color : (i % 2 == 0 ? even_row_color : odd_row_color)
+        string arrow_text = i == live_bin_index ? "→" : ""
+        table.cell(dashboard, 0, i + 2, arrow_text, text_halign=text.align_center, bgcolor=row_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+        string label_text = i == 0 ? "≥ 0.00%" : i == array.size(cumulative_counts) - 1 ? "> " + str.tostring(array.get(BIN_THRESHOLDS, i - 1), "#.##") + "%" : "≥ " + str.tostring(array.get(BIN_THRESHOLDS, i - 1), "#.##") + "%"
+        table.cell(dashboard, 1, i + 2, label_text, text_halign=text.align_left, bgcolor=row_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+        table.cell(dashboard, 2, i + 2, str.tostring(count), text_halign=text.align_right, bgcolor=row_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+        table.cell(dashboard, 3, i + 2, str.tostring(probability, "#.##") + "%", text_halign=text.align_right, bgcolor=row_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 0, array.size(cumulative_counts) + 2, "", bgcolor=header_color)
+    table.cell(dashboard, 1, array.size(cumulative_counts) + 2, "Total Days Analyzed", text_halign=text.align_left, bgcolor=header_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 2, array.size(cumulative_counts) + 2, str.tostring(total_days_counted), text_halign=text.align_right, bgcolor=header_color, text_color=color.black, text_size=table_text_size, text_font_family=font.family_monospace)
+    table.cell(dashboard, 3, array.size(cumulative_counts) + 2, "", bgcolor=header_color)
+
+// Daily candle
+// --- TYPE DEFINITIONS ---
+type Candle
+    float o
+    float c
+    float h
+    float l
+    int o_time
+    int o_idx
+    int c_idx
+    int h_idx
+    int l_idx
+    string dow
+    box body
+    line wick_up
+    line wick_down
+    label dow_label
+
+type Trace
+    line o
+    line c
+    line h
+    line l
+    label o_l
+    label c_l
+    label h_l
+    label l_l
+
+type CandleSettings
+    bool show
+    string htf
+    int max_display
+
+type Settings
+    color bull_body
+    color bull_border
+    color bull_wick
+    color bear_body
+    color bear_border
+    color bear_wick
+    int offset
+    int buffer
+    int width
+    bool daily_name
+    bool trace_show
+    color trace_o_color
+    string trace_o_style
+    int trace_o_size
+    color trace_c_color
+    string trace_c_style
+    int trace_c_size
+    color trace_h_color
+    string trace_h_style
+    int trace_h_size
+    color trace_l_color
+    string trace_l_style
+    int trace_l_size
+    bool label_show
+    color label_color
+    string label_size
+    string label_position
+    string label_alignment
+    bool htf_label_show
+    color htf_label_color
+    string htf_label_size
+    bool htf_timer_show
+    color htf_timer_color
+    string htf_timer_size
+    color dow_color
+    string dow_size
+
+type CandleSet
+    array<Candle> candles
+    CandleSettings settings
+    label tfNameTop
+    label tfNameBottom
+    label tfTimerTop
+    label tfTimerBottom
+
+type Helper
+    string name = 'Helper'
+
+// --- GLOBAL VARIABLES & OBJECTS ---
+
+Settings settings = Settings.new()
+
+// We only need one candle set for the Daily timeframe
+var CandleSettings SettingsDaily = CandleSettings.new()
+var array<Candle> candles_daily = array.new<Candle>(0)
+
+var CandleSet dailyCandleSet = CandleSet.new()
+dailyCandleSet.settings := SettingsDaily
+dailyCandleSet.candles := candles_daily
+
+//+------------------------------------------------------------------------------------------------------------+//
+//+--- Settings                                                                                             ---+//
+//+------------------------------------------------------------------------------------------------------------+//
+
+// Simplified to a single on/off toggle
+var bool showIndicator = input.bool(true, 'Show Daily Candle')
+
+// --- Hardcoded Settings (formerly inputs) ---
+dailyCandleSet.settings.show    := showIndicator
+dailyCandleSet.settings.htf     := '1D'
+dailyCandleSet.settings.max_display := 1
+
+settings.bull_body              := color.new(#b9d989, 0)
+settings.bear_body              := color.new(#024040, 25)
+settings.bull_border            := color.new(#024040, 67)
+settings.bear_border            := color.new(#024040, 67)
+settings.bull_wick              := color.new(#024040, 0)
+settings.bear_wick              := color.new(#024040, 0)
+
+settings.offset                 := 10
+settings.buffer                 := 1
+settings.width                  := 2 // Formerly input.int(1) * 2
+
+settings.htf_label_show         := true
+settings.htf_label_color        := color.new(#024040, 0)
+settings.htf_label_size         := size.large
+
+settings.label_position         := "Both"
+settings.label_alignment        := "Align"
+
+settings.htf_timer_show         := false
+settings.htf_timer_color        := color.new(#024040, 0)
+settings.htf_timer_size         := size.normal
+
+settings.daily_name             := false
+settings.dow_color              := color.black
+settings.dow_size               := size.small
+
+settings.trace_show             := true
+settings.trace_o_color          := color.new(#024040, 0)
+settings.trace_o_style          := '····'
+settings.trace_o_size           := 1
+settings.trace_c_color          := color.new(#024040, 0)
+settings.trace_c_style          := '····'
+settings.trace_c_size           := 1
+settings.trace_h_color          := color.new(#024040, 0)
+settings.trace_h_style          := '····'
+settings.trace_h_size           := 1
+settings.trace_l_color          := color.new(#024040, 0)
+settings.trace_l_style          := '····'
+settings.trace_l_size           := 1
+
+settings.label_show             := false
+settings.label_color            := color.new(#024040, 0)
+settings.label_size             := size.small
+
+
+//+------------------------------------------------------------------------------------------------------------+//
+//+--- Variables                                                                                            ---+//
+//+------------------------------------------------------------------------------------------------------------+//
+
+Helper helper = Helper.new()
+var Trace trace = Trace.new()
+color color_transparent = #ffffff00
+
+//+------------------------------------------------------------------------------------------------------------+//
+//+--- Internal Functions                                                                                   ---+//
+//+------------------------------------------------------------------------------------------------------------+//
+
+method LineStyle(Helper helper, string style) =>
+    helper.name := style
+    out = switch style
+        '----' => line.style_dashed
+        '····' => line.style_dotted
+        => line.style_solid
+    out
+
+method DayofWeek(Helper helper, int index) =>
+    helper.name := 'DOW'
+    switch
+        index == 1 => 'M'
+        index == 2 => 'T'
+        index == 3 => 'W'
+        index == 4 => 'T'
+        index == 5 => 'F'
+        index == 6 => 'S'
+        index == 7 => 'S'
+        na(index) => ''
+
+method ValidTimeframe(Helper helper, string HTF) =>
+    helper.name := HTF
+    if timeframe.in_seconds(HTF) >= timeframe.in_seconds('D') and timeframe.in_seconds(HTF) > timeframe.in_seconds()
+        true
+    else
+        n1 = timeframe.in_seconds()
+        n2 = timeframe.in_seconds(HTF)
+        n3 = n1 % n2
+        n1 < n2 and math.round(n2 / n1) == n2 / n1
+
+method RemainingTime(Helper helper, string HTF) =>
+    helper.name := HTF
+    if barstate.isrealtime
+        timeRemaining = (time_close(HTF) - timenow) / 1000
+        days = math.floor(timeRemaining / 86400)
+        hours = math.floor((timeRemaining - days * 86400) / 3600)
+        minutes = math.floor((timeRemaining - days * 86400 - hours * 3600) / 60)
+        seconds = math.floor(timeRemaining - days * 86400 - hours * 3600 - minutes * 60)
+
+        r = str.tostring(seconds, '00')
+        if minutes > 0 or hours > 0 or days > 0
+            r := str.tostring(minutes, '00') + ':' + r
+            r
+        if hours > 0 or days > 0
+            r := str.tostring(hours, '00') + ':' + r
+            r
+        if days > 0
+            r := str.tostring(days) + 'D ' + r
+            r
+        r
+    else
+        'n/a'
+
+method HTFName(Helper helper, string HTF) =>
+    helper.name := 'HTFName'
+    formatted = HTF
+
+    seconds = timeframe.in_seconds(HTF)
+    if seconds < 60
+        formatted := str.tostring(seconds) + 's'
+        formatted
+    else if seconds / 60 < 60
+        formatted := str.tostring(seconds / 60) + 'm'
+        formatted
+    else if seconds / 60 / 60 < 24
+        formatted := str.tostring(seconds / 60 / 60) + 'H'
+        formatted
+    formatted
+
+method CandleSetHigh(Helper helper, array<Candle> candles, float h) =>
+    helper.name := 'CandlesSetHigh'
+    float _h = h
+    if array.size(candles) > 0
+        for i = 0 to array.size(candles) - 1 by 1
+            Candle c = array.get(candles, i)
+            if c.h > _h
+                _h := c.h
+                _h
+    _h
+
+method CandleSetLow(Helper helper, array<Candle> candles, float l) =>
+    helper.name := 'CandlesSetLow'
+    float _l = l
+    if array.size(candles) > 0
+        for i = 0 to array.size(candles) - 1 by 1
+            Candle c = array.get(candles, i)
+            if c.l < _l
+                _l := c.l
+                _l
+    _l
+
+method CandlesHigh(Helper helper) =>
+    helper.name := 'CandlesHigh'
+    h = 0.0
+    if dailyCandleSet.settings.show and helper.ValidTimeframe(dailyCandleSet.settings.htf)
+        h := helper.CandleSetHigh(dailyCandleSet.candles, h)
+    h
+
+method CandlesLow(Helper helper, float h) =>
+    helper.name := 'CandlesLow'
+    l = h
+    if dailyCandleSet.settings.show and helper.ValidTimeframe(dailyCandleSet.settings.htf)
+        l := helper.CandleSetLow(dailyCandleSet.candles, l)
+    l
+
+method UpdateTime(CandleSet candleSet, int offset) =>
+    if settings.htf_timer_show and (barstate.isrealtime or barstate.islast)
+        string tmr = '(' + helper.RemainingTime(candleSet.settings.htf) + ')'
+
+        if not na(candleSet.tfTimerTop)
+            candleSet.tfTimerTop.set_text(tmr)
+
+        if not na(candleSet.tfTimerBottom)
+            candleSet.tfTimerBottom.set_text(tmr)
+    candleSet
+
+method Reorder(CandleSet candleSet, int offset) =>
+    size = candleSet.candles.size()
+
+    if size > 0
+        for i = size - 1 to 0 by 1
+            Candle candle = candleSet.candles.get(i)
+            t_buffer = offset + (settings.width + settings.buffer) * (size - i - 1)
+            box.set_left(candle.body, bar_index + t_buffer)
+            box.set_right(candle.body, bar_index + settings.width + t_buffer)
+            line.set_x1(candle.wick_up, bar_index + settings.width / 2 + t_buffer)
+            line.set_x2(candle.wick_up, bar_index + settings.width / 2 + t_buffer)
+            line.set_x1(candle.wick_down, bar_index + settings.width / 2 + t_buffer)
+            line.set_x2(candle.wick_down, bar_index + settings.width / 2 + t_buffer)
+
+            if settings.daily_name
+                if not na(candle.dow_label)
+                    candle.dow_label.set_y(candle.h)
+                    candle.dow_label.set_x(bar_index + settings.width / 2 + t_buffer)
+                    candle.dow_label.set_text(candle.dow)
+                else
+                    candle.dow_label := label.new(bar_index + settings.width / 2 + t_buffer, candle.h, candle.dow, color = color_transparent, textcolor = settings.dow_color, style = label.style_label_down, size = settings.dow_size)
+
+    top = 0.0
+    bottom = 0.0
+
+    if settings.label_alignment == 'Align'
+        top := helper.CandlesHigh()
+        bottom := helper.CandlesLow(top)
+    if settings.label_alignment == 'Follow Candles'
+        top := helper.CandleSetHigh(candleSet.candles, 0)
+        bottom := helper.CandleSetLow(candleSet.candles, top)
+
+    left = bar_index + offset + (settings.width + settings.buffer) * (size - 1) / 2
+
+    if settings.htf_label_show
+        string lblt = helper.HTFName(candleSet.settings.htf)
+        string lbll = lblt
+        if settings.htf_timer_show
+            lblt := lblt + '\n'
+            lbll := '\n' + lbll
+        if settings.daily_name
+            lblt := lblt + '\n'
+
+        string tmr = '(' + helper.RemainingTime(candleSet.settings.htf) + ')' + (settings.daily_name ? '\n' : '')
+        if settings.label_position == 'Both' or settings.label_position == 'Top'
+            
+            if not na(candleSet.tfNameTop)
+                candleSet.tfNameTop.set_xy(left, top)
+            else
+                candleSet.tfNameTop := label.new(left, top, lblt, color = color_transparent, textcolor = settings.htf_label_color, style = label.style_label_down, size = settings.htf_label_size)
+            if settings.htf_timer_show
+                if not na(candleSet.tfTimerTop)
+                    candleSet.tfTimerTop.set_xy(left, top)
+                else
+                    candleSet.tfTimerTop := label.new(left, top, tmr, color = color_transparent, textcolor = settings.htf_timer_color, style = label.style_label_down, size = settings.htf_timer_size)
+
+        if settings.label_position == 'Both' or settings.label_position == 'Bottom'
+            if not na(candleSet.tfNameBottom)
+                candleSet.tfNameBottom.set_xy(left, bottom)
+            else
+                candleSet.tfNameBottom := label.new(left, bottom, lbll, color = color_transparent, textcolor = settings.htf_label_color, style = label.style_label_up, size = settings.htf_label_size)
+            if settings.htf_timer_show
+                if settings.htf_timer_show
+                    if not na(candleSet.tfTimerBottom)
+                        candleSet.tfTimerBottom.set_xy(left, bottom)
+                    else
+                        candleSet.tfTimerBottom := label.new(left, bottom, tmr, color = color_transparent, textcolor = settings.htf_timer_color, style = label.style_label_up, size = settings.htf_timer_size)
+
+    candleSet
+
+method Monitor(CandleSet candleSet) =>
+    // The 'America/New_York' timezone is used to align with ICT concepts. This defines the daily candle's open/close time.
+    HTFBarTime = time(candleSet.settings.htf, 'America/New_York') 
+    isNewHTFCandle = ta.change(HTFBarTime) > 0
+
+    if isNewHTFCandle
+        Candle candle = Candle.new()
+        candle.o := open
+        candle.c := close
+        candle.h := high
+        candle.l := low
+        candle.o_time := time
+        candle.o_idx := bar_index
+        candle.c_idx := bar_index
+        candle.h_idx := bar_index
+        candle.l_idx := bar_index
+        candle.dow := switch
+            candleSet.settings.htf == '1D' =>
+                helper.DayofWeek(dayofweek(time_tradingday, "America/New_York"))
+            =>
+                ''
+        bull = candle.c > candle.o
+
+        candle.body := box.new(bar_index, math.max(candle.o, candle.c), bar_index + 2, math.min(candle.o, candle.c), bull ? settings.bull_border : settings.bear_border, 1, bgcolor = bull ? settings.bull_body : settings.bear_body)
+        candle.wick_up := line.new(bar_index + 1, candle.h, bar_index, math.max(candle.o, candle.c), color = bull ? settings.bull_wick : settings.bear_wick)
+        candle.wick_down := line.new(bar_index + 1, math.min(candle.o, candle.c), bar_index, candle.l, color = bull ? settings.bull_wick : settings.bear_wick)
+
+        candleSet.candles.unshift(candle)
+
+        if candleSet.candles.size() > candleSet.settings.max_display
+            Candle delCandle = array.pop(candleSet.candles)
+            box.delete(delCandle.body)
+            line.delete(delCandle.wick_up)
+            line.delete(delCandle.wick_down)
+            delCandle.dow_label.delete()
+
+    candleSet
+
+method Update(CandleSet candleSet, int offset, bool showTrace) =>
+    if candleSet.candles.size() > 0
+        Candle candle = candleSet.candles.first()
+        candle.h_idx := high > candle.h ? bar_index : candle.h_idx
+        candle.h := high > candle.h ? high : candle.h
+        candle.l_idx := low < candle.l ? bar_index : candle.l_idx
+        candle.l := low < candle.l ? low : candle.l
+        candle.c := close
+        candle.c_idx := bar_index
+
+        bull = candle.c > candle.o
+
+        box.set_top(candle.body, candle.o)
+        box.set_bottom(candle.body, candle.c)
+        box.set_bgcolor(candle.body, bull ? settings.bull_body : settings.bear_body)
+        box.set_border_color(candle.body, bull ? settings.bull_border : settings.bear_border)
+        line.set_color(candle.wick_up, bull ? settings.bull_wick : settings.bear_wick)
+        line.set_color(candle.wick_down, bull ? settings.bear_wick : settings.bear_wick)
+        line.set_y1(candle.wick_up, candle.h)
+        line.set_y2(candle.wick_up, math.max(candle.o, candle.c))
+        line.set_y1(candle.wick_down, candle.l)
+        line.set_y2(candle.wick_down, math.min(candle.o, candle.c))
+
+        if barstate.isrealtime or barstate.islast
+            candleSet.Reorder(offset)
+            if showTrace
+                if bar_index - candle.o_idx < 5000
+                    if na(trace.o)
+                        trace.o := line.new(candle.o_idx, candle.o, box.get_left(candle.body), candle.o, xloc = xloc.bar_index, color = settings.trace_o_color, style = helper.LineStyle(settings.trace_o_style), width = settings.trace_o_size)
+                    else
+                        line.set_xy1(trace.o, candle.o_idx, candle.o)
+                        line.set_xy2(trace.o, box.get_left(candle.body), candle.o)
+
+                    if settings.label_show
+                        if na(trace.o_l)
+                            trace.o_l := label.new(box.get_right(candle.body), candle.o, str.tostring(candle.o), textalign = text.align_center, style = label.style_label_left, size = settings.label_size, color = color_transparent, textcolor = settings.label_color)
+                        else
+                            label.set_xy(trace.o_l, box.get_right(candle.body), candle.o)
+                            label.set_text(trace.o_l, str.tostring(candle.o))
+
+                if bar_index - candle.c_idx < 5000
+                    if na(trace.c)
+                        trace.c := line.new(candle.c_idx, candle.c, box.get_left(candle.body), candle.c, xloc = xloc.bar_index, color = settings.trace_c_color, style = helper.LineStyle(settings.trace_c_style), width = settings.trace_c_size)
+                    else
+                        line.set_xy1(trace.c, candle.c_idx, candle.c)
+                        line.set_xy2(trace.c, box.get_left(candle.body), candle.c)
+
+                    if settings.label_show
+                        if na(trace.c_l)
+                            trace.c_l := label.new(box.get_right(candle.body), candle.c, str.tostring(candle.c), textalign = text.align_center, style = label.style_label_left, size = settings.label_size, color = color_transparent, textcolor = settings.label_color)
+                        else
+                            label.set_xy(trace.c_l, box.get_right(candle.body), candle.c)
+                            label.set_text(trace.c_l, str.tostring(candle.c))
+
+                if bar_index - candle.h_idx < 5000
+                    if na(trace.h)
+                        trace.h := line.new(candle.h_idx, candle.h, line.get_x1(candle.wick_up), candle.h, xloc = xloc.bar_index, color = settings.trace_h_color, style = helper.LineStyle(settings.trace_h_style), width = settings.trace_h_size)
+                    else
+                        line.set_xy1(trace.h, candle.h_idx, candle.h)
+                        line.set_xy2(trace.h, line.get_x1(candle.wick_up), candle.h)
+
+                    if settings.label_show
+                        if na(trace.h_l)
+                            trace.h_l := label.new(box.get_right(candle.body), candle.h, str.tostring(candle.h), textalign = text.align_center, style = label.style_label_left, size = settings.label_size, color = color_transparent, textcolor = settings.label_color)
+                        else
+                            label.set_xy(trace.h_l, box.get_right(candle.body), candle.h)
+                            label.set_text(trace.h_l, str.tostring(candle.h))
+
+                if bar_index - candle.l_idx < 5000
+                    if na(trace.l)
+                        trace.l := line.new(candle.l_idx, candle.l, line.get_x1(candle.wick_down), candle.l, xloc = xloc.bar_index, color = settings.trace_l_color, style = helper.LineStyle(settings.trace_l_style), width = settings.trace_l_size)
+                    else
+                        line.set_xy1(trace.l, candle.l_idx, candle.l)
+                        line.set_xy2(trace.l, line.get_x1(candle.wick_down), candle.l)
+
+                    if settings.label_show
+                        if na(trace.l_l)
+                            trace.l_l := label.new(box.get_right(candle.body), candle.l, str.tostring(candle.l), textalign = text.align_center, style = label.style_label_left, size = settings.label_size, color = color_transparent, textcolor = settings.label_color)
+                        else
+                            label.set_xy(trace.l_l, box.get_right(candle.body), candle.l)
+                            label.set_text(trace.l_l, str.tostring(candle.l))
+    candleSet
+
+// --- MAIN PROCESSING BLOCK ---
+// Simplified to handle only the single daily candle set on intraday timeframes
+if timeframe.isintraday and dailyCandleSet.settings.show and helper.ValidTimeframe(dailyCandleSet.settings.htf)
+    bool showTrace = settings.trace_show
+    int offset = settings.offset
+
+    dailyCandleSet.UpdateTime(offset)
+    dailyCandleSet.Monitor().Update(offset, showTrace)

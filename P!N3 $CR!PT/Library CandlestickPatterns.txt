@@ -1,0 +1,954 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © MUQWISHI
+
+//@version=6
+//@description This library provides a wide range of candlestick patterns, allowing users to call each pattern individually. It is a comprehensive and commonly used tool designed for their technical analysis. Credit to the public “*All Candlestick Patterns*” indicator.
+library("CandlestickPatterns", true)
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                 ESSENTIAL                                  |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// ++++++++++ Candle direction
+isBullish = open < close
+isBearish = open > close
+
+// ++++++++++ Candle range
+candleRange = high - low
+
+// ++++++++++ Candle Body and Wick Details
+bodyHigh = math.max(close, open)      
+bodyLow  = math.min(close, open)      
+bodySize = bodyHigh - bodyLow         // Absolute size of the candle body
+
+upperWick = high - bodyHigh           // Size of the upper wick
+lowerWick = bodyLow - low             // Size of the lower wick
+
+bodyMidpoint = bodyLow + bodySize/2   // Midpoint of the candle body
+
+// ++++++++++ Candle Body Range to Average 
+getBodyAvg(len) => 
+    ta.ema(bodySize, len)             // Exponential moving average of body size
+
+isBodySmallerThanAvg(enableCheck, len) =>
+    enableCheck ? bodySize < getBodyAvg(len) : true
+
+isBodyLargerThanAvg(enableCheck, len) =>
+    enableCheck ? bodySize > getBodyAvg(len) : true
+
+// ++++++++++ Wick Comparison to Body
+hasSignificantUpperWick = upperWick > 0.05 * bodySize  // Upper wick > 5% of body size
+hasSignificantLowerWick = lowerWick > 0.05 * bodySize  // Lower wick > 5% of body size
+
+
+// ++++++++++ Doji Structure
+// Returns true if body size is less than or equal to X% of total candle range
+isDojiBody(maxBodyPercent) =>
+    candleRange > 0 and bodySize <= candleRange * maxBodyPercent / 100
+
+// Returns true if wicks are approximately equal in size (within 100% difference of each other)
+isDojiCandle(maxBodyPercent) =>
+    isDojiBody(maxBodyPercent) and ( upperWick == lowerWick or 
+         (math.abs(upperWick - lowerWick) / lowerWick * 100 < 100) and 
+         (math.abs(lowerWick - upperWick) / upperWick * 100 < 100))
+
+
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                  PATTERNS                                  |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// ======================================= //
+//             Abandoned Baby              //
+// ======================================= //
+// A 3-candle reversal pattern: Bullish or Bearish
+// - Candle 1: strong trend (bullish or bearish)
+// - Candle 2: Doji gapped away from Candle 1
+// - Candle 3: Confirmation candle in opposite direction
+
+// @function Abandoned Baby is a bullish or bearish 3-candle reversal pattern. Candle 1: Strong trend. Candle 2: Doji gapped away. Candle 3: Reverses direction with a gap.
+// @param direction     (simple string)  Pattern type: "bull" or "bear"
+// @param maxBodyRange  (simple float)   Maximum body size (as % of range) to classify Candle 2 as a Doji. (Default: 5%)
+// @returns             (series bool)    True if an Abandoned Baby pattern is detected
+export abandonedBaby(simple string direction, simple float maxBodyRange = 5.0) =>
+    if direction == "bull"
+        isBearish[2] and                                // Candle 1: bearish
+         isDojiBody(maxBodyRange)[1] and                // Candle 2: doji with small body (maxBodyRange%)
+         low[2] > high[1] and                           // Gap between Candle 1 and Candle 2
+         isBullish and                                  // Candle 3: bullish confirmation
+         high[1] < low                                  // Gap between Candle 2 and Candle 3
+
+    else if direction == "bear"
+        isBullish[2] and                                // Candle 1: bullish
+         isDojiBody(maxBodyRange)[1] and                // Candle 2: doji with small body (maxBodyRange%)
+         high[2] < low[1] and                           // Gap between Candle 1 and Candle 2
+         isBearish and                                  // Candle 3: bearish confirmation
+         low[1] > high                                  // Gap between Candle 2 and Candle 3
+
+    else
+        false
+
+
+
+// ======================================= //
+//             Dark Cloud Cover            //
+// ======================================= //
+// A bearish 2-candle reversal pattern:
+// - Candle 1: Strong bullish candle
+// - Candle 2: Opens above Candle 1 high and closes below its midpoint
+
+// @function Dark Cloud Cover is a bearish 2-candle reversal pattern. Candle 1: Strong bullish. Candle 2: Opens above and closes below Candle 1’s midpoint.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if a Dark Cloud Cover pattern is detected
+export darkCloudCover(simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+	candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+
+	isBullish[1] and candle1BodyLrg[1] and                     // Candle 1: bullish AND large body*
+     isBearish and 										       // Candle 2: bearish AND 
+	 open >= high[1] and 									   //           opens above Candle 1's high (gap up) AND 
+	 close < bodyMidpoint[1] and 							   //           closes below midpoint of Candle 1 AND 
+	 close > open[1]                                           //           Candle 2 closes above Candle 1 open
+
+
+
+// ======================================= //
+//                  Doji                   //
+// ======================================= //
+// A neutral 1-candle pattern:
+// - Candle has a very small body (within a percentage of its total range)
+// - Upper and lower wicks are not extremely short (non-pin)
+
+// @function Doji is a 1-candle neutral pattern. Candle body is very small with significant upper and lower wicks.
+// @param maxBodyRange (simple float) Max body size as % of total range (default: 5%)
+// @returns            (series bool)  True if the current candle meets Doji conditions
+export doji(simple float maxBodyRange = 5.0) =>
+    isDojiCandle = isDojiCandle(maxBodyRange)
+    isDojiBody   = isDojiBody(maxBodyRange) 
+
+    isDojiCandle and                                // Body is small enough to qualify as a Doji
+	 not(isDojiBody and upperWick <= bodySize) and  // Not too large upper wick
+     not(isDojiBody and lowerWick <= bodySize)      // Not too large lower wick
+
+
+
+// ======================================= //
+//                Doji Star                //
+// ======================================= //
+// A 2-candle reversal pattern (bullish or bearish):
+// - Candle 1: Strong trend candle (bullish or bearish)
+// - Candle 2: Doji gapped away in the opposite direction
+
+// @function Doji Star is a bullish or bearish 2-candle reversal pattern. Candle 1: Strong trend. Candle 2: Doji gapped in opposite direction.
+// @param direction            (simple string) Pattern type: "bull" or "bear"
+// @param isAvgCandle1BodyLrg  (simple bool)   Whether Candle 1 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)    Period used to calculate average body size (default: 14)
+// @param maxBodyRange         (simple float)  Maximum body size of Candle 2 (Doji) as a % of its candle range. Used to classify the Doji candle (default: 5%)
+// @returns                    (series bool)   True if a Doji Star pattern is detected
+export dojiStar(simple string direction, simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14, simple float maxBodyRange = 5.0) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2Doji   = isDojiBody(maxBodyRange)
+
+    if direction == "bull"
+        isBearish[1] and candle1BodyLrg[1] and          // Candle 1: strong bearish candle
+         candle2Doji and bodyHigh < bodyLow[1]          // Candle 2: Doji with gap down
+
+    else if direction == "bear"
+        isBullish[1] and candle1BodyLrg[1] and          // Candle 1: strong bullish candle
+         candle2Doji and bodyLow > bodyHigh[1]          // Candle 2: Doji with gap up
+
+    else
+        false
+
+
+
+// ======================================= //
+//           Downside Tasuki Gap           //
+// ======================================= //
+// A bearish 3-candle continuation pattern:
+// - Candle 1: Strong bearish candle
+// - Candle 2: Bearish candle gapped down from Candle 1
+// - Candle 3: Bullish candle that partially fills the gap without fully closing it
+
+// @function Downside Tasuki Gap is a bearish 3-candle continuation pattern. Candles 1 & 2: Bearish with a downward gap. Candle 3: Bullish candle partially fills the gap.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml  (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if a Downside Tasuki Gap pattern is detected
+export downsideTasukiGap(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2BodySml = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)
+
+    candle1BodyLrg[2] and candle2BodySml[1] and                 // Candle 1: large bearish, Candle 2: small bearish
+     isBearish[2] and bodyHigh[1] < bodyLow[2] and              // Candle 1 & 2: downward gap
+     isBearish[1] and                                           // Candle 2: bearish
+     isBullish and                                              // Candle 3: bullish AND
+     bodyHigh <= bodyLow[2] and                                 //           does not close above Candle 1 low AND
+     bodyHigh >= bodyHigh[1]                                    //           fills the gap at least partially
+
+
+
+// ======================================= //
+//             Dragonfly Doji              //
+// ======================================= //
+// A bullish 1-candle reversal pattern:
+// - Candle has a very small body (within a % of its total range)
+// - Very short or no upper wick
+// - Long lower wick (implied by structure)
+
+// @function Dragonfly Doji is a bullish 1-candle reversal pattern. Small body with very short or no upper wick and a long lower wick.
+// @param maxBodyRange  (simple float) Maximum body size as a % of candle range to classify as Doji (default: 5%)
+// @returns             (series bool)  True if a Dragonfly Doji pattern is detected
+export dragonflyDoji(simple float maxBodyRange = 5.0) =>
+    isDojiBody(maxBodyRange) and upperWick <= bodySize   // Small body + tiny upper wick
+
+
+
+// ======================================= //
+//                Engulfing                //
+// ======================================= //
+// A 2-candle reversal pattern (bullish or bearish):
+// - Candle 1: Small-bodied candle (bullish or bearish)
+// - Candle 2: Opposite-direction candle that fully engulfs Candle 1's body
+
+// @function Engulfing is a bullish or bearish 2-candle reversal pattern. Candle 2 fully engulfs Candle 1's body in the opposite direction.
+// @param direction            (simple string) Pattern type: "bull" or "bear"
+// @param isAvgCandle1BodySml  (simple bool)   Whether Candle 1 must have a body smaller than average (default: true)
+// @param isAvgCandle2BodyLrg  (simple bool)   Whether Candle 2 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)    Period used to calculate average body size (default: 14)
+// @returns                    (series bool)   True if an Engulfing pattern is detected
+export engulfing(simple string direction, simple bool isAvgCandle1BodySml = true, simple bool isAvgCandle2BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodySml = isBodySmallerThanAvg(isAvgCandle1BodySml, bodyAvgLength)
+    candle2BodyLrg = isBodyLargerThanAvg (isAvgCandle2BodyLrg, bodyAvgLength)
+
+    if direction == "bull"
+        isBullish and candle2BodyLrg and                      // Candle 2: bullish, large body
+         isBearish[1] and candle1BodySml[1] and               // Candle 1: bearish, small body
+         close >= open[1] and open <= close[1] and            // Candle 2 fully engulfs Candle 1
+         (close > open[1] or open < close[1])                 // Must not be equal (true engulfing)
+        
+    else if direction == "bear"
+        isBearish and candle2BodyLrg and                      // Candle 2: bearish, large body
+         isBullish[1] and candle1BodySml[1] and               // Candle 1: bullish, small body
+         close <= open[1] and open >= close[1] and            // Candle 2 fully engulfs Candle 1
+         (close < open[1] or open > close[1])                 // Must not be equal (true engulfing)
+        
+    else
+        false
+
+
+
+// ======================================= //
+//            Evening Doji Star            //
+// ======================================= //
+// A bearish 3-candle reversal pattern:
+// - Candle 1: Strong bullish candle
+// - Candle 2: Doji gapped above Candle 1
+// - Candle 3: Bearish candle that closes well into Candle 1's body
+
+// @function Evening Doji Star is a bearish 3-candle reversal pattern. Candle 1: Strong bullish. Candle 2: Doji gapped up. Candle 3: Strong bearish closes into Candle 1.
+// @param isAvgCandle1BodyLrg  (simple bool)  Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle3BodyLrg  (simple bool)  Whether Candle 3 must have a body larger than average (default: true)
+// @param maxBodyRange         (simple float) Maximum body size of Candle 2 (Doji) as a % of its candle range. Used to classify the Doji candle (default: 5%)
+// @param bodyAvgLength        (simple int)   Period used to calculate average body size (default: 14)
+// @returns                    (series bool)  True if an Evening Doji Star pattern is detected
+export eveningDojiStar(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle3BodyLrg = true, simple float maxBodyRange = 5.0, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+    candle3BodyLrg = isBodyLargerThanAvg(isAvgCandle3BodyLrg, bodyAvgLength)
+    candle2Doji    = isDojiBody(maxBodyRange)
+
+    candle1BodyLrg[2] and isBullish[2] and                     // Candle 1: strong bullish
+     candle2Doji[1] and bodyLow[1] > bodyHigh[2] and           // Candle 2: Doji gapped up
+     candle3BodyLrg and isBearish and                          // Candle 3: strong bearish
+     bodyLow <= bodyMidpoint[2] and                            // Candle 3 closes well into Candle 1
+     bodyLow > bodyLow[2] and                                  // Does not break Candle 1 low
+     bodyLow[1] > bodyHigh                                     // Doji sits above current candle (gap down)
+
+
+
+// ======================================= //
+//               Evening Star              //
+// ======================================= //
+// A bearish 3-candle reversal pattern:
+// - Candle 1: Strong bullish candle
+// - Candle 2: Small-bodied candle gapped above Candle 1
+// - Candle 3: Strong bearish candle closing well into Candle 1
+
+// @function Evening Star is a bearish 3-candle reversal pattern. Candle 1: Strong bullish. Candle 2: Small body gapped up. Candle 3: Strong bearish closes into Candle 1.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average  (default: true)
+// @param isAvgCandle2BodySml  (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param isAvgCandle3BodyLrg  (simple bool) Whether Candle 3 must have a body larger than average  (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if an Evening Star pattern is detected
+export eveningStar(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple bool isAvgCandle3BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2BodySml = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)
+    candle3BodyLrg = isBodyLargerThanAvg (isAvgCandle3BodyLrg, bodyAvgLength)
+
+    candle1BodyLrg[2] and isBullish[2] and                     // Candle 1: strong bullish
+     candle2BodySml[1] and bodyLow[1] > bodyHigh[2] and        // Candle 2: small body, gapped up
+     candle3BodyLrg and isBearish and                          // Candle 3: strong bearish
+     bodyLow <= bodyMidpoint[2] and                            // Closes well into Candle 1
+     bodyLow > bodyLow[2] and                                  // Does not break Candle 1 low
+     bodyLow[1] > bodyHigh                                     // Gap down from Candle 2
+
+
+
+// ======================================= //
+//         Falling Three Methods           //
+// ======================================= //
+// A bearish 5-candle continuation pattern:
+// - Candle    1: Strong bearish candle
+// - Candles 2–4: Small-bodied bullish candles within the range of Candle 1
+// - Candle    5: Strong bearish candle closing below Candle 1
+
+// @function a Falling Three Methods is a bearish 5-candle continuation pattern. Candle 1: Strong bearish candle. Candles 2–4: Small-bodied bullish candles within the range of Candle 1. Candle 5: Strong bearish candle closing below Candle 1
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml  (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param isAvgCandle3BodySml  (simple bool) Whether Candle 3 must have a body smaller than average (default: true)
+// @param isAvgCandle4BodySml  (simple bool) Whether Candle 4 must have a body smaller than average (default: true)
+// @param isAvgCandle5BodyLrg  (simple bool) Whether Candle 5 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if the Falling Three Methods pattern is detected
+export fallingThreeMethods(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple bool isAvgCandle3BodySml = true, simple bool isAvgCandle4BodySml = true, simple bool isAvgCandle5BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1Valid = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)[4] and isBearish[4]                                              // Candle 1: large bearish
+    candle2Valid = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)[3] and isBullish[3] and open[3] > low[4] and close[3] < high[4]  // Candle 2: small bullish within Candle 1
+    candle3Valid = isBodySmallerThanAvg(isAvgCandle3BodySml, bodyAvgLength)[2] and isBullish[2] and open[2] > low[4] and close[2] < high[4]  // Candle 3: small bullish within Candle 1
+    candle4Valid = isBodySmallerThanAvg(isAvgCandle4BodySml, bodyAvgLength)[1] and isBullish[1] and open[1] > low[4] and close[1] < high[4]  // Candle 4: small bullish within Candle 1
+    candle5Valid = isBodyLargerThanAvg (isAvgCandle5BodyLrg, bodyAvgLength)[0] and isBearish[0] and close   < close[4]                       // Candle 5: strong bearish closing below Candle 1
+
+    candle1Valid and candle2Valid and candle3Valid and candle4Valid and candle5Valid
+
+
+
+// ======================================= //
+//             Falling Window              //
+// ======================================= //
+// A bearish 2-candle continuation pattern:
+// - Candle 1: Any valid candle (non-zero range)
+// - Candle 2: Gaps down completely below Candle 1 (no overlap)
+
+// @function Falling Window is A bearish 2-candle continuation pattern. Candle 1: Any valid candle (non-zero range). Candle 2: Gaps down completely below Candle 1 (no overlap)
+// @returns  (series bool) True if a Falling Window pattern is detected
+export fallingWindow() =>
+    validRange = candleRange != 0 and candleRange[1] != 0     // Both candles must have valid range
+    gapDown    = high < low[1]                                // Current high is below previous low
+
+    validRange and gapDown
+
+
+
+// ======================================= //
+//             Gravestone Doji             //
+// ======================================= //
+// A bearish 1-candle reversal pattern:
+// - Candle has a very small body (within a % of its total range)
+// - Very short or no lower wick
+// - Long upper wick (implied by structure)
+
+// @function Gravestone Doji is a bearish 1-candle reversal pattern. Small body with little or no lower wick and a long upper wick.
+// @param maxBodyRange (simple float) Maximum body size as a % of candle range to classify as Doji (default: 5%)
+// @returns            (series bool)  True if a Gravestone Doji pattern is detected
+export gravestoneDoji(simple float maxBodyRange = 5.0) =>
+    isDojiBody(maxBodyRange) and lowerWick <= bodySize  // Small body + tiny lower wick
+
+
+
+// ======================================= //
+//                 Hammer                  //
+// ======================================= //
+// A bullish 1-candle reversal pattern:
+// - Small real body near the top of the range
+// - Long lower wick (at least 2x the body)
+// - Very small or no upper wick
+
+// @function Hammer is a bullish 1-candle reversal pattern. Small body near the top of the range with a long lower wick (≥ 2x body size) and little to no upper wick.
+// @param isAvgCandleBodySml  (simple bool) Whether the candle body must be smaller than average (default: true)
+// @param bodyAvgLength       (simple int)  Period used to calculate average body size (default: 14)
+// @returns                   (series bool) True if a Hammer pattern is detected
+export hammer(simple bool isAvgCandleBodySml = true, simple int bodyAvgLength = 14) =>
+    candleBodySml = isBodySmallerThanAvg(isAvgCandleBodySml, bodyAvgLength)
+
+    candleBodySml and bodySize > 0 and                            // Small but non-zero body
+     bodyLow > hl2 and                                            // Body near top of candle
+     lowerWick >= 2.0 * bodySize and not hasSignificantUpperWick  // Long lower wick, no upper wick
+
+
+
+// ======================================= //
+//               Hanging Man               //
+// ======================================= //
+// A bearish 1-candle reversal pattern:
+// - Small real body near the top of the range
+// - Long lower wick (at least 2x the body)
+// - Very small or no upper wick
+
+// @function Hanging Man is a bearish 1-candle reversal pattern. Small body near the top of the range with a long lower wick (≥ 2x body size) and little to no upper wick. Typically appears after an uptrend.
+// @param isAvgCandleBodySml  (simple bool) Whether the candle body must be smaller than average (default: true)
+// @param bodyAvgLength       (simple int)  Period used to calculate average body size (default: 14)
+// @returns                   (series bool) True if a Hanging Man pattern is detected
+export hangingMan(simple bool isAvgCandleBodySml = true, simple int bodyAvgLength = 14) =>
+    candleBodySml = isBodySmallerThanAvg(isAvgCandleBodySml, bodyAvgLength)
+
+    candleBodySml and bodySize > 0 and                            // Small but non-zero body
+     bodyLow > hl2 and                                            // Body near top of candle
+     lowerWick >= 2.0 * bodySize and not hasSignificantUpperWick  // Long lower wick, no upper wick
+
+
+
+// ======================================= //
+//              Harami Cross               //
+// ======================================= //
+// A 2-candle reversal pattern (bullish or bearish):
+// - Candle 1: Strong trend candle (bullish or bearish)
+// - Candle 2: Doji that is completely inside the body of Candle 1
+
+// @function Harami Cross is a bullish or bearish 2-candle reversal pattern. Candle 1: Strong trend candle. Candle 2: Doji completely contained within Candle 1's body.
+// @param direction            (simple string) Pattern type: "bull" or "bear"
+// @param isAvgCandle1BodyLrg  (simple bool)   Whether Candle 1 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)    Period used to calculate average body size (default: 14)
+// @returns                    (series bool)   True if a Harami Cross pattern is detected
+export haramiCross(string direction, simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+
+    if direction == "bull"
+        candle1BodyLrg[1] and isBearish[1] and                     // Candle 1: large bearish
+         isDojiBody(5.0) and                                       // Candle 2: Doji
+         high <= bodyHigh[1] and low >= bodyLow[1]                 //           fully inside Candle 1
+
+    else if direction == "bear"
+        candle1BodyLrg[1] and isBullish[1] and                     // Candle 1: large bullish
+         isDojiBody(5.0) and                                       // Candle 2: Doji
+         high <= bodyHigh[1] and low >= bodyLow[1]                 //           fully inside Candle 1
+
+    else
+        false
+
+
+
+// ======================================= //
+//                 Harami                  //
+// ======================================= //
+// A 2-candle reversal pattern (bullish or bearish):
+// - Candle 1: Strong trend candle (bullish or bearish)
+// - Candle 2: Smaller real body fully inside Candle 1’s body
+
+// @function Harami is a bullish or bearish 2-candle reversal pattern. Candle 1: Strong trend candle. Candle 2: Small real body completely contained within Candle 1’s body.
+// @param direction            (simple string) Pattern type: "bull" or "bear"
+// @param isAvgCandle1BodyLrg  (simple bool)   Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml  (simple bool)   Whether Candle 2 must have a body smaller than average (default: true)
+// @param bodyAvgLength        (simple int)    Period used to calculate average body size (default: 14)
+// @returns                    (series bool)   True if a Harami pattern is detected
+export harami(string direction, simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2BodySml = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)
+
+    if direction == "bull"
+        candle1BodyLrg[1] and isBearish[1] and         // Candle 1: large bearish
+         isBullish and candle2BodySml and              // Candle 2: small bullish
+         high <= bodyHigh[1] and low >= bodyLow[1]     //           fully inside Candle 1 body
+
+    else if direction == "bear"
+        candle1BodyLrg[1] and isBullish[1] and         // Candle 1: large bullish
+         isBearish and candle2BodySml and              // Candle 2: small bearish
+         high <= bodyHigh[1] and low >= bodyLow[1]     //           fully inside Candle 1 body
+
+    else
+        false
+
+
+
+// ======================================= //
+//             Inverted Hammer             //
+// ======================================= //
+// A bullish 1-candle reversal pattern:
+// - Small real body near the bottom of the range
+// - Long upper wick (at least 2x the body)
+// - Very small or no lower wick
+// - Appears after a downtrend
+
+// @function Inverted Hammer is a bullish 1-candle reversal pattern. Small body near the bottom of the range with a long upper wick (≥ 2x body size) and little to no lower wick. Typically appears after a downtrend.
+// @param isAvgCandleBodySml  (simple bool) Whether the candle body must be smaller than average (default: true)
+// @param bodyAvgLength       (simple int)  Period used to calculate average body size (default: 14)
+// @returns                   (series bool) True if an Inverted Hammer pattern is detected
+export invertedHammer(simple bool isAvgCandleBodySml = true, simple int bodyAvgLength = 14) =>
+    candleBodySml = isBodySmallerThanAvg(isAvgCandleBodySml, bodyAvgLength)
+
+    candleBodySml and bodySize > 0 and                            // Small but non-zero body
+     bodyHigh < hl2 and                                           // Body near bottom of candle
+     upperWick >= 2.0 * bodySize and not hasSignificantLowerWick  // Long upper wick, no lower wick
+
+
+
+// ======================================= //
+//                 Kicking                 //
+// ======================================= //
+// A strong bullish or bearish 2-candle reversal pattern:
+// - Candle 1: Marubozu in one direction (no or very small wicks)
+// - Candle 2: Opposite Marubozu gapped in the opposite direction
+
+// @function Kicking is a bullish or bearish 2-candle reversal pattern. Candle 1: Full-bodied Marubozu. Candle 2: Opposite-direction Marubozu with a full gap between candles.
+// @param direction            (simple string) Pattern type: "bull" or "bear"
+// @param isAvgCandle1BodyLrg  (simple bool)   Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodyLrg  (simple bool)   Whether Candle 2 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)    Period used to calculate average body size (default: 14)
+// @returns                    (series bool)   True if a Kicking pattern is detected
+export kicking(string direction, simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2BodyLrg = isBodyLargerThanAvg(isAvgCandle2BodyLrg, bodyAvgLength)
+
+    marubozu1 = candle1BodyLrg[1] and upperWick[1] <= 0.05 * bodySize[1] and lowerWick[1] <= 0.05 * bodySize[1]
+    marubozu2 = candle2BodyLrg and upperWick <= 0.05 * bodySize and lowerWick <= 0.05 * bodySize
+
+    if direction == "bull"
+        marubozu1 and isBearish[1] and                   // Candle 1: bearish Marubozu
+         marubozu2 and isBullish and                     // Candle 2: bullish Marubozu
+         high[1] < low                                   // Full upward gap
+
+    else if direction == "bear"
+        marubozu1 and isBullish[1] and                   // Candle 1: bullish Marubozu
+         marubozu2 and isBearish and                     // Candle 2: bearish Marubozu
+         low[1] > high                                   // Full downward gap
+
+    else
+        false
+
+
+
+// ======================================= //
+//            Long Lower Shadow            //
+// ======================================= //
+// A bullish 1-candle signal pattern:
+// - Candle has a long lower wick
+// - Lower wick must be greater than a defined % of the total candle range
+
+// @function Long Lower Shadow is a bullish 1-candle signal pattern. The lower wick must exceed a specified percentage of the candle's total range.
+// @param minLowerWickPercent (simple float) Minimum lower wick length as a % of total candle range (default: 75)
+// @returns                   (series bool)  True if the Long Lower Shadow pattern is detected
+export longLowerShadow(simple float minLowerWickPercent = 75.0) =>
+    lowerWick > (candleRange * minLowerWickPercent / 100)  // Lower wick is greater than X% of total candle range
+
+
+
+// ======================================= //
+//            Long Upper Shadow            //
+// ======================================= //
+// A bearish 1-candle signal pattern:
+// - Candle has a long upper wick
+// - Upper wick must be greater than a defined % of the total candle range
+
+// @function Long Upper Shadow is a bearish 1-candle signal pattern. The upper wick must exceed a specified percentage of the candle's total range.
+// @param minUpperWickPercent (simple float) Minimum upper wick length as a % of total candle range (default: 75)
+// @returns                   (series bool)  True if the Long Upper Shadow pattern is detected
+export longUpperShadow(simple float minUpperWickPercent = 75.0) =>
+    upperWick > (candleRange * minUpperWickPercent / 100) // Upper wick is greater than X% of total candle range
+
+
+// ======================================= //
+//             Marubozu Black              //
+// ======================================= //
+// A bearish 1-candle pattern:
+// - Full-bodied bearish candle (no or very small wicks)
+// - Strong body, usually appears during strong down moves
+
+// @function Marubozu Black is a bearish 1-candle pattern. It has a large bearish body with little or no upper/lower wicks.
+// @param isAvgCandleBodyLrg (simple bool) Whether the candle body must be larger than average (default: true)
+// @param bodyAvgLength       (simple int)  Period used to calculate average body size (default: 14)
+// @returns                   (series bool) True if a Marubozu Black pattern is detected
+export marubozuBlack(simple bool isAvgCandleBodyLrg = true, simple int bodyAvgLength = 14) =>
+    candleBodyLrg = isBodyLargerThanAvg(isAvgCandleBodyLrg, bodyAvgLength)
+
+    isBearish and                               // Candle is bearish
+     candleBodyLrg and                          // Body is larger than average
+     upperWick <= 0.05 * bodySize and           // Upper wick is very small (≤ 5% of body)
+     lowerWick <= 0.05 * bodySize               // Lower wick is very small (≤ 5% of body)
+
+
+
+// ======================================= //
+//             Marubozu White              //
+// ======================================= //
+// A bullish 1-candle pattern:
+// - Full-bodied bullish candle (no or very small wicks)
+// - Strong body, usually appears during strong up moves
+
+// @function Marubozu White is a bullish 1-candle pattern. It has a large bullish body with little or no upper/lower wicks.
+// @param isAvgCandleBodyLrg  (simple bool) Whether the candle body must be larger than average (default: true)
+// @param bodyAvgLength       (simple int)  Period used to calculate average body size (default: 14)
+// @returns                   (series bool) True if a Marubozu White pattern is detected
+export marubozuWhite(simple bool isAvgCandleBodyLrg = true, simple int bodyAvgLength = 14) =>
+    candleBodyLrg = isBodyLargerThanAvg(isAvgCandleBodyLrg, bodyAvgLength)
+
+    isBullish and                                // Candle is bullish
+     candleBodyLrg and                           // Body is larger than average
+     upperWick <= 0.05 * bodySize and            // Upper wick is very small (≤ 5% of body)
+     lowerWick <= 0.05 * bodySize                // Lower wick is very small (≤ 5% of body)
+
+
+
+// ======================================= //
+//            Morning Doji Star            //
+// ======================================= //
+// A bullish 3-candle reversal pattern:
+// - Candle 1: Strong bearish candle
+// - Candle 2: Doji gapped down from Candle 1
+// - Candle 3: Strong bullish candle that closes well into Candle 1’s body
+
+// @function Morning Doji Star is a bullish 3-candle reversal pattern. Candle 1: Strong bearish. Candle 2: Doji gapped down. Candle 3: Strong bullish closing into Candle 1.
+// @param isAvgCandle1BodyLrg  (simple bool)  Whether Candle 1 must have a body larger than average (default: true)
+// @param maxBodyRange         (simple float) Max body size of Candle 2 (Doji) as % of its candle range (default: 5%)
+// @param isAvgCandle3BodyLrg  (simple bool)  Whether Candle 3 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)   Period used to calculate average body size (default: 14)
+// @returns                    (series bool)  True if a Morning Doji Star pattern is detected
+export morningDojiStar(simple bool isAvgCandle1BodyLrg = true, simple float maxBodyRange = 5.0, simple bool isAvgCandle3BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+    candle3BodyLrg = isBodyLargerThanAvg(isAvgCandle3BodyLrg, bodyAvgLength)
+    candle2Doji    = isDojiBody(maxBodyRange)
+
+    candle1BodyLrg[2] and isBearish[2] and                // Candle 1: strong bearish
+     candle2Doji[1] and                                   // Candle 2: small Doji
+     bodyHigh[1] < bodyLow[2] and                         // Candle 2 gapped below Candle 1
+     candle3BodyLrg and isBullish and                     // Candle 3: strong bullish
+     bodyHigh >= bodyMidpoint[2] and                      //           Closes into Candle 1 body
+     bodyHigh < bodyHigh[2] and                           //           Doesn't close above Candle 1
+     bodyHigh[1] < bodyLow                                //           Candle 2 sits below (gap up)
+
+
+
+// ======================================= //
+//              Morning Star               //
+// ======================================= //
+// A bullish 3-candle reversal pattern:
+// - Candle 1: Strong bearish candle
+// - Candle 2: Small-bodied candle gapped below Candle 1
+// - Candle 3: Strong bullish candle closing well into Candle 1’s body
+
+// @function Morning Star is a bullish 3-candle reversal pattern. Candle 1: Strong bearish. Candle 2: Small body gapped down. Candle 3: Strong bullish closing into Candle 1.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml  (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param isAvgCandle3BodyLrg  (simple bool) Whether Candle 3 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if a Morning Star pattern is detected
+export morningStar(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple bool isAvgCandle3BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2BodySml = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)
+    candle3BodyLrg = isBodyLargerThanAvg (isAvgCandle3BodyLrg, bodyAvgLength)
+
+    candle1BodyLrg[2] and isBearish[2] and                   // Candle 1: strong bearish
+     candle2BodySml[1] and bodyHigh[1] < bodyLow[2] and      // Candle 2: small body gapped down
+     candle3BodyLrg and isBullish and                        // Candle 3: strong bullish
+     bodyHigh >= bodyMidpoint[2] and                         //           Closes into Candle 1's body
+     bodyHigh < bodyHigh[2] and                              //           Does not close above Candle 1 high
+     bodyHigh[1] < bodyLow                                   //           Gap up
+
+
+
+// ======================================= //
+//                 On Neck                 //
+// ======================================= //
+// A bearish 2-candle continuation pattern:
+// - Candle 1: Strong bearish candle
+// - Candle 2: Small bullish candle that opens below and closes near the low of Candle 1
+
+// @function On Neck is a bearish 2-candle continuation pattern. Candle 1: Strong bearish. Candle 2: Small bullish candle that closes near the low of Candle 1.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml  (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if an On Neck pattern is detected
+export onNeck(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+    candle2BodySml = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)
+    closeNearLow   = math.abs(close - low[1]) <= getBodyAvg(bodyAvgLength) * 0.05
+
+    isBearish[1] and candle1BodyLrg[1] and                 // Candle 1: strong bearish
+     isBullish and candle2BodySml and                      // Candle 2: small bullish
+     open < close[1] and                                   //           Opens below Candle 1 close
+     candleRange != 0 and                                  //           Ensure valid candle (non-zero range)
+     closeNearLow                                          //           Closes near the low of Candle 1
+
+
+
+// ======================================= //
+//                 Piercing                //
+// ======================================= //
+// A bullish 2-candle reversal pattern:
+// - Candle 1: Strong bearish candle
+// - Candle 2: Opens below Candle 1’s low and closes above its midpoint, but below Candle 1’s open
+
+// @function Piercing is a bullish 2-candle reversal pattern. Candle 1: Strong bearish. Candle 2: Opens below Candle 1’s low and closes above midpoint of Candle 1 but below its open.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if a Piercing pattern is detected
+export piercing(simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+
+    isBearish[1] and candle1BodyLrg[1] and        // Candle 1: strong bearish
+     isBullish and                                // Candle 2: bullish
+     open <= low[1] and                           //           Opens below Candle 1's low (gap down)
+     close > bodyMidpoint[1] and                  //           Closes above Candle 1's midpoint
+     close < open[1]                              //           But still closes below Candle 1's open
+
+
+
+// ======================================= //
+//          Rising Three Methods           //
+// ======================================= //
+// A bullish 5-candle continuation pattern:
+// - Candle 1: Strong bullish candle
+// - Candles 2–4: Small bearish candles within Candle 1’s range
+// - Candle 5: Strong bullish candle closing above Candle 1’s close
+
+// @function Rising Three Methods is a bullish 5-candle continuation pattern. Candle 1: Strong bullish. Candles 2–4: Small-bodied bearish within Candle 1 range. Candle 5: Strong bullish closing higher than Candle 1.
+// @param isAvgCandle1BodyLrg (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param isAvgCandle3BodySml (simple bool) Whether Candle 3 must have a body smaller than average (default: true)
+// @param isAvgCandle4BodySml (simple bool) Whether Candle 4 must have a body smaller than average (default: true)
+// @param isAvgCandle5BodyLrg (simple bool) Whether Candle 5 (current) must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Period used to calculate average body size (default: 14)
+// @returns                    (series bool) True if a Rising Three Methods pattern is detected
+export risingThreeMethods(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple bool isAvgCandle3BodySml = true, simple bool isAvgCandle4BodySml = true, simple bool isAvgCandle5BodyLrg = true, simple int bodyAvgLength = 14) =>
+	candle1Valid = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)[4] and isBullish[4]                                             // Candle 1: large bullish
+    candle2Valid = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)[3] and isBearish[3] and open[3] < high[4] and close[3] > low[4] // Candle 2: small bearish within Candle 1
+    candle3Valid = isBodySmallerThanAvg(isAvgCandle3BodySml, bodyAvgLength)[2] and isBearish[2] and open[2] < high[4] and close[2] > low[4] // Candle 3: small bearish within Candle 1
+    candle4Valid = isBodySmallerThanAvg(isAvgCandle4BodySml, bodyAvgLength)[1] and isBearish[1] and open[1] < high[4] and close[1] > low[4] // Candle 4: small bearish within Candle 1
+    candle5Valid = isBodyLargerThanAvg (isAvgCandle5BodyLrg, bodyAvgLength)    and isBullish    and close   > close[4]                      // Candle 5: strong bullish closing above Candle 1
+
+    candle1Valid and candle2Valid and candle3Valid and candle4Valid and candle5Valid
+
+
+
+// ======================================= //
+//              Rising Window              //
+// ======================================= //
+// A bullish 2-candle continuation pattern:
+// - Candle 1: Any valid candle (non-zero range)
+// - Candle 2: Gaps up completely above Candle 1 (no overlap)
+
+// @function Rising Window is a bullish 2-candle continuation pattern. Candle 1: Any valid candle (non-zero range). Candle 2: Gaps up completely above Candle 1 (no overlap).
+// @returns  (series bool) True if a Rising Window pattern is detected
+export risingWindow() =>
+    candleRange != 0 and          // Candle 2 has a non-zero range (valid candle)
+     candleRange[1] != 0 and      // Candle 1 has a non-zero range (valid candle)
+     low > high[1]                // Candle 2's low is higher than Candle 1's high
+
+
+
+// ======================================= //
+//              Shooting Star              //
+// ======================================= //
+// A bearish 1-candle reversal pattern:
+// - Candle: Small body near low
+// - Long upper wick and no lower wick
+
+// @function Shooting Star is a bearish 1-candle reversal pattern. Candle has a small body near the low, a long upper wick, and no lower wick.
+// @param isAvgCandleBodySml  (simple bool) Whether the candle's body must be smaller than average (default: true)
+// @param bodyAvgLength       (simple int)  Length of average candle body calculation (default: 14)
+// @returns                   (series bool) True if a Shooting Star pattern is detected
+export shootingStar(simple bool isAvgCandleBodySml = true, simple int bodyAvgLength = 14) =>
+	candleBodySml = isBodySmallerThanAvg(isAvgCandleBodySml, bodyAvgLength)
+
+    candleBodySml and                          // Body smaller than average
+     bodySize > 0 and                          // Body range is not zero
+     bodyHigh < hl2 and                        // Body located near candle low
+     upperWick >= 2.0 * bodySize and           // Upper wick is twice larger the body
+     not hasSignificantLowerWick               // No significant lower wick
+
+
+
+// ======================================= //
+//           Spinning Top Black            //
+// ======================================= //
+// A neutral 1-candle pattern (indecision):
+// - Candle: Small bearish body
+// - Long upper and lower wicks
+// - Not a doji
+
+// @function Spinning Top Black is a neutral 1-candle pattern with a small bearish body and long upper and lower wicks. The candle must not be a doji.
+// @param minLowerWickPercent  (simple float) Minimum lower wick size as a % of candle range (default: 34%)
+// @param minUpperWickPercent  (simple float) Minimum upper wick size as a % of candle range (default: 34%)
+// @returns                    (series bool) True if a Spinning Top Black pattern is detected
+export spinningTopBlack(simple float minLowerWickPercent = 34.0, simple float minUpperWickPercent = 34.0) =>
+    isDoji = isDojiBody(5.0)
+
+    lowerWick  >= candleRange * minLowerWickPercent / 100 and  // Long lower wick
+     upperWick >= candleRange * minUpperWickPercent / 100 and  // Long upper wick
+     not isDoji and isBearish                                  // Not a Doji and must be Bearish candle
+
+
+
+// ======================================= //
+//           Spinning Top White            //
+// ======================================= //
+// A neutral 1-candle pattern (indecision):
+// - Candle: Small bullish body
+// - Long upper and lower wicks
+// - Not a doji
+
+// @function Spinning Top White is a neutral 1-candle pattern with a small bullish body and long upper and lower wicks. The candle must not be a doji.
+// @param minLowerWickPercent  (simple float) Minimum lower wick size as a % of candle range (default: 34%)
+// @param minUpperWickPercent  (simple float) Minimum upper wick size as a % of candle range (default: 34%)
+// @returns                    (series bool) True if a Spinning Top White pattern is detected
+export spinningTopWhite(simple float minLowerWickPercent = 34.0, simple float minUpperWickPercent = 34.0) =>
+    isDoji = isDojiBody(5.0)
+
+    lowerWick  >= candleRange * minLowerWickPercent / 100 and  // Long lower wick
+     upperWick >= candleRange * minUpperWickPercent / 100 and  // Long upper wick
+     not isDoji and isBullish                                  // Not a Doji and must be Bullish candle
+
+
+
+// ======================================= //
+//            Three Black Crows            //
+// ======================================= //
+// A bearish 3-candle reversal pattern:
+// - Three consecutive strong bearish candles
+// - Each opens within the body of the previous candle
+// - Each closes lower than the previous close
+// - No significant lower wicks
+
+// @function Three Black Crows is a bearish 3-candle reversal pattern with three strong bearish candles, each opening within the previous candle's body and closing progressively lower. The candles should have no significant lower wicks.
+// @param isAvgCandle3BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodyLrg  (simple bool) Whether Candle 2 must have a body larger than average (default: true)
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 3 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Length of average candle body calculation (default: 14)
+// @returns                    (series bool) True if a Three Black Crows pattern is detected
+export threeBlackCrows(simple bool isAvgCandle3BodyLrg = true, simple bool isAvgCandle2BodyLrg = true, simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1Valid = isBodyLargerThanAvg(isAvgCandle3BodyLrg, bodyAvgLength)[2] and isBearish[2] and lowerWick[2] <= 0.05 * candleRange[2]
+    candle2Valid = isBodyLargerThanAvg(isAvgCandle2BodyLrg, bodyAvgLength)[1] and isBearish[1] and lowerWick[1] <= 0.05 * candleRange[1]
+    candle3Valid = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)    and isBearish    and lowerWick    <= 0.05 * candleRange
+
+    candlesDescending = close < close[1] and close[1] < close[2]
+    opensWithinBody   = open < open[1] and open > close[1] and open[1] < open[2] and open[1] > close[2]
+
+    candle1Valid and candle2Valid and candle3Valid and candlesDescending and opensWithinBody
+
+
+
+// ======================================= //
+//          Three White Soldiers           //
+// ======================================= //
+// A bullish 3-candle reversal pattern:
+// - Three consecutive strong bullish candles
+// - Each opens within the body of the previous candle
+// - Each closes higher than the previous close
+// - No significant upper wicks
+
+// @function Three White Soldiers is a bullish 3-candle reversal pattern with three strong bullish candles, each opening within the previous candle's body and closing progressively higher. The candles should have no significant upper wicks.
+// @param isAvgCandle3BodyLrg (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodyLrg (simple bool) Whether Candle 2 must have a body larger than average (default: true)
+// @param isAvgCandle1BodyLrg (simple bool) Whether Candle 3 must have a body larger than average (default: true)
+// @param bodyAvgLength       (simple int)  Length of average candle body calculation (default: 14)
+// @returns                   (series bool) True if a Three White Soldiers pattern is detected
+export threeWhiteSoldiers(simple bool isAvgCandle3BodyLrg = true, simple bool isAvgCandle2BodyLrg = true, simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1Valid = isBodyLargerThanAvg(isAvgCandle3BodyLrg, bodyAvgLength)[2] and isBullish[2] and upperWick[2] <= 0.05 * candleRange[2]
+    candle2Valid = isBodyLargerThanAvg(isAvgCandle2BodyLrg, bodyAvgLength)[1] and isBullish[1] and upperWick[1] <= 0.05 * candleRange[1]
+    candle3Valid = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)    and isBullish    and upperWick    <= 0.05 * candleRange
+
+    candlesAscending = close > close[1] and close[1] > close[2]
+    opensWithinBody  = open > open[1] and open < close[1] and open[1] > open[2] and open[1] < close[2]
+
+    candle1Valid and candle2Valid and candle3Valid and candlesAscending and opensWithinBody
+
+
+
+// ======================================= //
+//                Tri Star                 //
+// ======================================= //
+// A 3-candle Doji reversal pattern:
+// - Candle 1: Doji
+// - Candle 2: Doji gapped from Candle 1
+// - Candle 3: Doji in the opposite direction gap
+// - Direction can be bullish or bearish
+
+// @function Tri Star is a 3-candle reversal pattern formed by three consecutive Doji candles with gaps between them. A "bull" Tri Star appears after a downtrend and implies a reversal to the upside. A "bear" Tri Star appears after an uptrend and signals a potential decline.
+// @param direction          (simple string) Pattern direction type: "bull" or "bear"
+// @param doji1MaxBodyRange  (simple float)  Maximum body size of Candle 1 as a % of its range (default: 5%)
+// @param doji2MaxBodyRange  (simple float)  Maximum body size of Candle 2 as a % of its range (default: 5%)
+// @param doji3MaxBodyRange  (simple float)  Maximum body size of Candle 3 as a % of its range (default: 5%)
+// @returns                  (series bool) True if a Tri Star pattern is detected
+export triStar(simple string direction, simple float doji1MaxBodyRange = 5.0, simple float doji2MaxBodyRange = 5.0, simple float doji3MaxBodyRange = 5.0) =>
+    isDoji1 = isDojiCandle(doji1MaxBodyRange)   // Candle 1 must be a Doji
+    isDoji2 = isDojiCandle(doji2MaxBodyRange)   // Candle 2 must be a Doji
+    isDoji3 = isDojiCandle(doji3MaxBodyRange)   // Candle 3 must be a Doji
+
+    if direction == "bull"
+        isDoji1[2] and isDoji2[1] and isDoji3 and    // Candles 1-3 are Dogi
+         bodyLow[2] > bodyHigh[1] and                // Gap between Candle 1 and Candle 2
+         bodyHigh[1] < bodyLow                       // Gap between Candle 2 and Candle 3
+
+    else if direction == "bear"
+        isDoji1[2] and isDoji2[1] and isDoji3 and    // Candles 1-3 are Dogi
+         bodyHigh[2] < bodyLow[1] and                // Gap between Candle 1 and Candle 2
+         bodyLow[1] > bodyHigh                       // Gap between Candle 2 and Candle 3
+
+    else
+        false
+
+
+
+// ======================================= //
+//             Tweezer Bottom              //
+// ======================================= //
+// A bullish 2-candle reversal pattern:
+// - Candle 1: Strong bearish candle
+// - Candle 2: Bullish candle with same low as Candle 1 (approx)
+// - Not a doji, must have upper and lower wicks
+
+// @function Tweezer Bottom is a bullish 2-candle reversal pattern. Candle 1 is a strong bearish candle. Candle 2 is bullish with approximately the same low. Both candles must have significant wicks and not be dojis.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Length of average candle body calculation (default: 14)
+// @returns                    (series bool) True if a Tweezer Bottom pattern is detected
+export tweezerBottom(simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg    = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)
+    notDojiOrHasWicks = not isDojiBody(5.0) or (hasSignificantUpperWick and hasSignificantLowerWick)
+    lowMatch          = math.abs(low - low[1]) <= getBodyAvg(bodyAvgLength) * 0.05
+
+    isBearish[1] and candle1BodyLrg[1] and        // Candle 1: Bearish, body larger than average
+     isBullish and                                // Candle 2: Bullish
+     notDojiOrHasWicks and                        // Candle 2: Not a doji or has wicks
+     lowMatch                                     // Candle 2 low approximately equal to Candle 1 low
+
+
+
+// ======================================= //
+//               Tweezer Top               //
+// ======================================= //
+// A bearish 2-candle reversal pattern:
+// - Candle 1: Strong bullish candle
+// - Candle 2: Bearish candle with similar high as Candle 1
+// - At least one of the two must not be a Doji
+
+// @function Tweezer Top is a bearish 2-candle reversal pattern. Candle 1 is a strong bullish candle. Candle 2 is bearish with approximately the same high. Both candles must have significant wicks and not be dojis.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param bodyAvgLength        (simple int)  Length of average candle body calculation (default: 14)
+// @returns                    (series bool) True if a Tweezer Top pattern is detected
+export tweezerTop(simple bool isAvgCandle1BodyLrg = true, simple int bodyAvgLength = 14) =>
+    candle1BodyLrg     = isBodyLargerThanAvg(isAvgCandle1BodyLrg, bodyAvgLength)[1]
+    notDojiOrHasWicks  = not isDojiBody(5.0) or (hasSignificantUpperWick and hasSignificantLowerWick)
+    highCloseEnough    = math.abs(high - high[1]) <= getBodyAvg(bodyAvgLength) * 0.05
+
+    highCloseEnough and                              // Highs of both candles nearly equal
+     notDojiOrHasWicks and                           // At least one candle not Doji
+     isBullish[1] and isBearish and candle1BodyLrg   // Candle 1 bullish and large, Candle 2 bearish
+
+
+
+// ======================================= //
+//            Upside Tasuki Gap            //
+// ======================================= //
+// A bullish 3-candle continuation pattern:
+// - Candle 1: Strong bullish candle with large body
+// - Candle 2: Smaller bullish candle gapping up from Candle 1
+// - Candle 3: Bearish candle that closes within the gap but doesn't fully fill it
+
+// @function Upside Tasuki Gap is a bullish 3-candle continuation pattern. Candle 1 is a strong bullish candle. Candle 2 is a smaller bullish candle gapping up from Candle 1. Candle 3 is bearish and closes within the gap but doesn't fully fill it.
+// @param isAvgCandle1BodyLrg  (simple bool) Whether Candle 1 must have a body larger than average (default: true)
+// @param isAvgCandle2BodySml  (simple bool) Whether Candle 2 must have a body smaller than average (default: true)
+// @param bodyAvgLength        (simple int)  Length of average candle body calculation (default: 14)
+// @returns                    (series bool) True if an Upside Tasuki Gap pattern is detected
+export upsideTasukiGap(simple bool isAvgCandle1BodyLrg = true, simple bool isAvgCandle2BodySml = true, simple int bodyAvgLength = 14) =>
+	candle1BodyLrg = isBodyLargerThanAvg (isAvgCandle1BodyLrg, bodyAvgLength)
+	candle2BodySml = isBodySmallerThanAvg(isAvgCandle2BodySml, bodyAvgLength)
+
+    isBullish[2]  and candle1BodyLrg[2] and                                // Candle 1: Large bullish
+     isBullish[1] and candle2BodySml[1] and bodyLow[1] > bodyHigh[2] and   // Candle 2: Smaller bullish and Gaps up
+     isBearish[0] and bodyLow >= bodyHigh[2] and bodyLow <= bodyLow[1]     // Candle 3: Bearish AND Closes within but not below gap
+                                                    

@@ -1,0 +1,109 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TheUltimator5
+
+//@version=6
+indicator("Intraday vs Overnight OBV [theUltimator5]", overlay=false)
+
+// === User Inputs ===
+plotChoice = input.string("Both Intraday and Overnight", title="Synthetic OBV Type", 
+     options=["Both Intraday and Overnight", "Intraday", "Overnight", "Aggregate"])
+overnightVol = input.int(20, title="Estimated Overnight Volume %", minval=0, maxval=100)
+colorByDirection = input.bool(true, title="Color OBV Lines by Direction?")
+blendWeight = input.float(0.5,title="Color blending strength (value from 0 to 1)",minval = 0, maxval = 1)
+
+// === Moving Average Inputs ===
+showMA = input.bool(true, title="Show Moving Average?")
+maType = input.string("SMA", title="MA Type", options=["SMA", "EMA", "WMA", "RMA"])
+maLen  = input.int(20, title="MA Length", minval=1)
+colorMAByPosition = input.bool(true, title="Color MA Based on Position Relative to OBV?")
+
+
+// === Volume Allocation
+overnightVolume = volume * overnightVol / 100
+intradayVolume  = volume - overnightVolume
+
+// === Price Changes
+intradayChange  = close - open
+overnightChange = open - close[1]
+
+// === OBV-style Calculation
+var float intradayOBV  = na
+var float overnightOBV = na
+var float aggregateOBV = na
+
+if na(intradayOBV)
+    intradayOBV := 0
+    overnightOBV := 0
+    aggregateOBV := 0
+else
+    intradayDelta  = intradayChange > 0 ? intradayVolume : intradayChange < 0 ? -intradayVolume : 0
+    overnightDelta = overnightChange > 0 ? overnightVolume : overnightChange < 0 ? -overnightVolume : 0
+
+    intradayOBV  += intradayDelta
+    overnightOBV += overnightDelta
+    aggregateOBV += intradayDelta + overnightDelta
+
+// === Simulated Tint Blending Function
+tintRGB(baseColor, currentVal, prevVal) =>
+    // Base RGB values
+    r = color.r(baseColor)
+    g = color.g(baseColor)
+    b = color.b(baseColor)
+
+    // Tint weights
+    
+    newR = r
+    newG = g
+    newB = b
+
+    if colorByDirection
+        if currentVal > prevVal
+            // Blend toward green
+            newR := r * (1 - blendWeight) + 0   * blendWeight
+            newG := g * (1 - blendWeight) + 255 * blendWeight
+            newB := b * (1 - blendWeight) + 0   * blendWeight
+        else if currentVal < prevVal
+            // Blend toward red
+            newR := r * (1 - blendWeight) + 255 * blendWeight
+            newG := g * (1 - blendWeight) + 0   * blendWeight
+            newB := b * (1 - blendWeight) + 0   * blendWeight
+
+    color.rgb(int(newR), int(newG), int(newB))
+
+// === Tinted Colors Based on Direction
+intraColor     = tintRGB(color.orange,  intradayOBV,  nz(intradayOBV[1]))
+overnightColor = tintRGB(color.blue, overnightOBV, nz(overnightOBV[1]))
+aggregateColor = tintRGB(color.teal,     aggregateOBV, nz(aggregateOBV[1]))
+
+// === Plot Toggles
+showIntra = plotChoice == "Intraday" or plotChoice == "Both Intraday and Overnight"
+showOver  = plotChoice == "Overnight" or plotChoice == "Both Intraday and Overnight"
+showAgg   = plotChoice == "Aggregate"
+
+// === Final Plots
+plot(showIntra ? intradayOBV : na, title="Intraday OBV",  color=intraColor,     linewidth=2)
+plot(showOver  ? overnightOBV : na, title="Overnight OBV", color=overnightColor, linewidth=2)
+plot(showAgg   ? aggregateOBV : na, title="Aggregate OBV", color=aggregateColor, linewidth=2)
+
+// === Moving Average Logic
+getMA(source, type, len) =>
+     type == "SMA" ? ta.sma(source, len) :
+     type == "EMA" ? ta.ema(source, len) :
+     type == "WMA" ? ta.wma(source, len) :
+     type == "RMA" ? ta.rma(source, len) :
+     na
+
+maSource =
+     plotChoice == "Intraday"  ? intradayOBV :
+     plotChoice == "Overnight" ? overnightOBV :
+     aggregateOBV
+
+maLine = showMA ? getMA(maSource, maType, maLen) : na
+
+// === MA Color Logic
+maColor = not colorMAByPosition ? color.aqua :
+     maLine < maSource ? color.green :
+     maLine > maSource ? color.red :
+     color.aqua
+
+plot(showMA ? maLine : na, title="Moving Average", color=maColor, linewidth=1, style=plot.style_line)

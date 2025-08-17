@@ -1,0 +1,167 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// @ shui2967
+
+//@version=6
+indicator("Delta Volume Bubbles", overlay = true)
+import TradingView/ta/8 as ta
+
+//#region ——— Inputs
+bool  show_bubbles      = input.bool(true, "Show Bubbles", group = "Order Flow")
+float bubble_percentile = input.float(60, "Bubble Volume %ile", minval = 0, maxval = 100, group = "Order Flow")
+bool  show_labels       = input.bool(true, "Show Numbers in Bubbles", group = "Bubble Labels")
+float label_percentile  = input.float(90, "Label Volume %ile", minval = 0, maxval = 100, group = "Bubble Labels")
+bool  intensity_mode    = input.bool(false, "Intensity Mode", group = "Order Flow")
+
+// Use official data toggle
+bool use_official_data = input.bool(true, "Use Official Volume Delta Data", group = "Order Flow")
+
+// Delta normalization method
+bool use_delta_avg = input.bool(true, "Use Delta Average (vs Volume SMA)", group = "Order Flow")
+
+// Filter method toggle
+bool use_delta_filter = input.bool(true, "Use Delta Filter (vs Volume Filter)", group = "Order Flow")
+
+bool use_aggressive_factor = input.bool(false, "Use Aggressive Factor", group = "Order Flow")
+
+// Minimal mode toggle
+bool minimal_mode = input.bool(false, "Minimal Mode (Tiny dots only)", group = "Order Flow")
+
+// Custom timeframe inputs
+lowerTimeframeTooltip = "The indicator scans lower timeframe data to approximate up and down volume used in the delta calculation. By default, the timeframe is chosen automatically. These inputs override this with a custom timeframe.\n\nHigher timeframes provide more historical data, but the data will be less precise."
+useCustomTimeframeInput = input.bool(false, "Use custom timeframe", tooltip = lowerTimeframeTooltip, group = "Order Flow")
+lowerTimeframeInput = input.timeframe("1", "Timeframe", group = "Order Flow")
+
+color aggressive_buy    = color.new(#00ff88, 20)
+color aggressive_sell   = color.new(#ff4444, 20)
+color passive_buy       = color.new(#88ff88, 60)
+color passive_sell      = color.new(#ff8888, 60)
+
+color low_intensity     = color.new(color.gray, 70)
+color med_intensity     = color.new(color.blue, 50)
+color high_intensity    = color.new(color.orange, 30)
+color extreme_intensity = color.new(color.red, 10)
+//#endregion
+
+//#region ——— Helper Functions
+// Custom function to format numbers with K notation
+format_with_k(value) =>
+    abs_value = math.abs(value)
+    sign = value < 0 ? "-" : ""
+    
+    if abs_value >= 1000000
+        sign + str.tostring(abs_value / 1000000, "#.##") + "M"
+    else if abs_value >= 1000
+        sign + str.tostring(abs_value / 1000, "#.##") + "K"
+    else
+        sign + str.tostring(abs_value, "#")
+//#endregion
+
+//#region ——— Calculations
+// Determine lower timeframe using switch expression (Pine v6 syntax)
+var string lowerTimeframe = switch
+    useCustomTimeframeInput => lowerTimeframeInput
+    timeframe.isseconds     => "1S"
+    timeframe.isintraday    => "1"
+    timeframe.isdaily       => "5"
+    => "60"
+
+// Request official volume delta data
+[openDelta, maxDelta, minDelta, lastDelta] = ta.requestVolumeDelta(lowerTimeframe)
+
+VOL = volume
+source = hl2
+
+// Fallback estimation method
+price_change   = close - open
+price_range    = high - low
+body_ratio     = price_range == 0 ? 0 : math.abs(price_change) / price_range
+
+aggressive_factor = use_aggressive_factor ? (body_ratio > 0.7 ? 1.5 : body_ratio > 0.4 ? 1.2 : 1.0) : 1.0
+buy_vol  = price_change > 0 ? VOL * aggressive_factor : 0
+sell_vol = price_change < 0 ? VOL * aggressive_factor : 0
+
+
+fallback_net_delta = buy_vol - sell_vol
+
+// Use official data if toggle is on, else fallback
+net_delta = use_official_data ? lastDelta : fallback_net_delta
+
+// Calculate both normalization methods
+vol_ma = ta.sma(VOL, 20)
+delta_avg = ta.sma(math.abs(net_delta), 20)  // Average of absolute delta values
+
+// Choose normalization method based on user preference
+normalization_base = use_delta_avg ? delta_avg : vol_ma
+delta_strength = normalization_base == 0 ? 0 : math.abs(net_delta) / normalization_base
+
+// Calculate both filter types
+bubble_vol_filter = ta.percentile_linear_interpolation(VOL, 50, bubble_percentile)
+bubble_delta_filter = ta.percentile_linear_interpolation(math.abs(net_delta), 50, bubble_percentile)
+
+label_vol_filter = ta.percentile_linear_interpolation(VOL, 50, label_percentile)
+label_delta_filter = ta.percentile_linear_interpolation(math.abs(net_delta), 50, label_percentile)
+
+// Choose filter method
+bubble_filter = use_delta_filter ? bubble_delta_filter : bubble_vol_filter
+label_filter = use_delta_filter ? label_delta_filter : label_vol_filter
+
+// Determine flow type based on net_delta and delta_strength
+is_aggressive_buy  = net_delta > 0 and delta_strength > 1.2
+is_aggressive_sell = net_delta < 0 and delta_strength > 1.2
+
+flow_color = is_aggressive_buy ? aggressive_buy : 
+             is_aggressive_sell ? aggressive_sell :
+             net_delta > 0 ? passive_buy : passive_sell
+
+intensity_color = delta_strength < 0.5 ? low_intensity :
+                  delta_strength < 1.0 ? med_intensity :
+                  delta_strength < 2.0 ? high_intensity : extreme_intensity
+
+final_color = intensity_mode ? intensity_color : flow_color
+
+// Updated bubble size logic with new filter
+show_tiny   = delta_strength < 0.3 and show_bubbles and (use_delta_filter ? math.abs(net_delta) > bubble_filter : VOL > bubble_filter)
+show_small  = delta_strength >= 0.3 and delta_strength < 0.7 and show_bubbles and (use_delta_filter ? math.abs(net_delta) > bubble_filter : VOL > bubble_filter)
+show_normal = delta_strength >= 0.7 and delta_strength < 1.2 and show_bubbles and (use_delta_filter ? math.abs(net_delta) > bubble_filter : VOL > bubble_filter)
+show_large  = delta_strength >= 1.2 and delta_strength < 2.0 and show_bubbles and (use_delta_filter ? math.abs(net_delta) > bubble_filter : VOL > bubble_filter)
+show_huge   = delta_strength >= 2.0 and show_bubbles and (use_delta_filter ? math.abs(net_delta) > bubble_filter : VOL > bubble_filter)
+
+// Updated bubble label logic with new filter
+show_label = show_labels and (use_delta_filter ? math.abs(net_delta) > label_filter : VOL > label_filter)
+bubble_text = format_with_k(net_delta)
+//#endregion
+
+//#region ——— Plotting
+// Calculate offset and dot position at global scope
+float offset = syminfo.mintick * 3
+float dot_position = net_delta > 0 ? high + offset : low - offset
+bool show_dot = (show_tiny or show_small or show_normal or show_large or show_huge) and show_bubbles
+
+// All plotshape calls at global scope with conditional series
+plotshape(minimal_mode and show_dot ? dot_position : na, "", shape.circle, location.absolute, final_color, 0, "", na, size = size.tiny)
+
+plotshape(not minimal_mode and show_tiny ? source : na, "", shape.circle, location.absolute, final_color, 0, "", na, size = size.tiny)
+plotshape(not minimal_mode and show_small ? source : na, "", shape.circle, location.absolute, final_color, 0, "", na, size = size.small)
+plotshape(not minimal_mode and show_normal ? source : na, "", shape.circle, location.absolute, final_color, 0, "", na, size = size.normal)
+plotshape(not minimal_mode and show_large ? source : na, "", shape.circle, location.absolute, final_color, 0, "", na, size = size.large)
+plotshape(not minimal_mode and show_huge ? source : na, "", shape.circle, location.absolute, final_color, 0, "", na, size = size.huge)
+
+// Labels only show in normal mode
+if not minimal_mode and show_label
+    if show_huge
+        label.new(bar_index, source, bubble_text, style=label.style_label_center, color=color.new(color.white, 100), textcolor=color.black, size=size.small)
+    else if show_large
+        label.new(bar_index, source, bubble_text, style=label.style_label_center, color=color.new(color.white, 100), textcolor=color.black, size=size.small)
+    else if show_normal
+        label.new(bar_index, source, bubble_text, style=label.style_label_center, color=color.new(color.white, 100), textcolor=color.black, size=size.small)
+    else if show_small
+        label.new(bar_index, source, bubble_text, style=label.style_label_center, color=color.new(color.white, 100), textcolor=color.black, size=size.small)
+    else if show_tiny
+        label.new(bar_index, source, bubble_text, style=label.style_label_center, color=color.new(color.white, 100), textcolor=color.black, size=size.small)
+
+// Warning for no volume data
+if ta.cum(volume) <= 0 and barstate.islast
+    label.new(bar_index, hl2, "No Volume Data Available\nSwitch to volume-enabled symbol", 
+              style = label.style_label_left, 
+              textcolor = chart.fg_color)
+//#endregion

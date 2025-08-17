@@ -1,0 +1,404 @@
+//@version=6
+indicator("Smart Pattern Scanner Pro", "Smart Pattern Scanner Pro", overlay=true, dynamic_requests=true)
+import MUQWISHI/CandlestickPatterns/3 as cp
+import n00btraders/Timezone/1 as tz
+
+// ===== Table Configuration =====
+var G0 = "📊 Table Settings"
+tablePos = input.string("Bottom Center", "Table Position", ["Top Right","Middle Right","Bottom Right","Top Center","Middle Center","Bottom Center","Top Left","Middle Left","Bottom Left"], group=G0)
+tableSize = input.string("Normal", "Table Size", ["Tiny", "Small", "Normal", "Large", "Huge"], group=G0)
+bodySize = input.int(12, "Body Text Size", minval=8, maxval=20, group=G0)
+headSize = input.int(13, "Header Text Size", minval=9, maxval=22, group=G0)
+titleSize = input.int(15, "Title Text Size", minval=10, maxval=26, group=G0)
+var timzon = input.enum(tz.TimezoneDST.EXCHANGE, "Timezone", group=G0).tostring()
+showVolume = input.bool(true, "Show Volume Analysis", group=G0)
+showProgress = input.bool(true, "Show Progress Indicators", group=G0)
+
+// ===== Color Theme Settings =====
+var GC = "🎨 Color Theme"
+bullColor = input.color(#22C55E, "Bullish Color", group=GC)
+bearColor = input.color(#EF4444, "Bearish Color", group=GC)
+neutralColor = input.color(#3B82F6, "Neutral Color", group=GC)
+volumeUpColor = input.color(#10B981, "Volume Up Color", group=GC)
+volumeDownColor = input.color(#F59E0B, "Volume Down Color", group=GC)
+
+// Professional color palette
+titleBg = color.rgb(20, 25, 35)
+titleText = color.white
+headerBg = color.rgb(40, 50, 70)
+headerText = color.white
+rowBg1 = color.rgb(25, 30, 40)
+rowBg2 = color.rgb(30, 35, 45)
+borderCol = color.rgb(60, 70, 90)
+textColor = color.rgb(230, 235, 240)
+
+var GTF = "⏱️ Timeframes"
+tf_list_str = input.string("5,15,60,240,1D,1W", "Timeframes (comma-separated)", group=GTF)
+
+var G1 = "📈 Technical Analysis"
+maChk = input.bool(true, "Detect Trend Based on SMA", group=G1)
+maLen = input.int(50, "SMA Length", minval=1, group=G1)
+volMaLen = input.int(20, "Volume MA Length", minval=1, group=G1)
+
+var G2 = "🕯️ Pattern Selection"
+enum side
+    bull = "Bullish"
+    bear = "Bearish"
+    all  = "Both"
+ptrnTyp = input.enum(side.all, "Pattern Type", group=G2)
+
+// Pattern checkboxes
+abandonedBabyChk=input.bool(true,"Abandoned Baby",group=G2)
+dbarkCloudCoverChk=input.bool(true,"Dark Cloud Cover",group=G2)
+dojiChk=input.bool(true,"Doji",group=G2)
+dojiStarChk=input.bool(true,"Doji Star",group=G2)
+downsideTasukiGapChk=input.bool(true,"Downside Tasuki Gap",group=G2)
+dragonflyDojiChk=input.bool(true,"Dragonfly Doji",group=G2)
+engulfingChk=input.bool(true,"Engulfing",group=G2)
+eveningDojiStarChk=input.bool(true,"Evening Doji Star",group=G2)
+eveningStarChk=input.bool(true,"Evening Star",group=G2)
+fallingThreeMethodsChk=input.bool(true,"Falling Three Methods",group=G2)
+fallingWindowChk=input.bool(true,"Falling Window",group=G2)
+gravestoneDojiChk=input.bool(true,"Gravestone Doji",group=G2)
+hammerChk=input.bool(true,"Hammer",group=G2)
+hangingManChk=input.bool(true,"Hanging Man",group=G2)
+haramiCrossChk=input.bool(true,"Harami Cross",group=G2)
+haramiChk=input.bool(true,"Harami",group=G2)
+invertedHammerChk=input.bool(true,"Inverted Hammer",group=G2)
+kickingChk=input.bool(true,"Kicking",group=G2)
+longLowerShadowChk=input.bool(true,"Long Lower Shadow",group=G2)
+longUpperShadowChk=input.bool(true,"Long Upper Shadow",group=G2)
+marubozuBlackChk=input.bool(true,"Marubozu Black",group=G2)
+marubozuWhiteChk=input.bool(true,"Marubozu White",group=G2)
+morningDojiStarChk=input.bool(true,"Morning Doji Star",group=G2)
+morningStarChk=input.bool(true,"Morning Star",group=G2)
+onNeckChk=input.bool(true,"On Neck",group=G2)
+piercingChk=input.bool(true,"Piercing",group=G2)
+risingThreeMethodsChk=input.bool(true,"Rising Three Methods",group=G2)
+risingWindowChk=input.bool(true,"Rising Window",group=G2)
+shootingStarChk=input.bool(true,"Shooting Star",group=G2)
+spinningTopBlackChk=input.bool(true,"Spinning Top Black",group=G2)
+spinningTopWhiteChk=input.bool(true,"Spinning Top White",group=G2)
+threeBlackCrowsChk=input.bool(true,"Three Black Crows",group=G2)
+threeWhiteSoldiersChk=input.bool(true,"Three White Soldiers",group=G2)
+triStarChk=input.bool(true,"Tri-Star",group=G2)
+tweezerBottomChk=input.bool(true,"Tweezer Bottom",group=G2)
+tweezerTopChk=input.bool(true,"Tweezer Top",group=G2)
+upsideTasukiGapChk=input.bool(true,"Upside Tasuki Gap",group=G2)
+
+// ===== Helper Functions =====
+var bull = not(ptrnTyp == side.bear)
+var bear = not(ptrnTyp == side.bull)
+toStr(x) => str.tostring(x, str.replace(str.tostring(syminfo.mintick), "1", "0"))
+timForm(x) => not timeframe.isintraday ? str.format_time(x, "MM-dd", timzon) : timeframe.isseconds ? str.format_time(x, "HH:mm", timzon) : str.format_time(x, "HH:mm", timzon)
+getPos(x) => x=="Top Right"?position.top_right:x=="Middle Right"?position.middle_right:x=="Bottom Right"?position.bottom_right:x=="Top Center"?position.top_center:x=="Middle Center"?position.middle_center:x=="Bottom Center"?position.bottom_center:x=="Top Left"?position.top_left:x=="Middle Left"?position.middle_left:position.bottom_left
+
+// Format timeframe to full name
+formatTimeframe(tf) =>
+    result = tf == "1" ? "1 Minute" : tf == "3" ? "3 Minutes" : tf == "5" ? "5 Minutes" : tf == "15" ? "15 Minutes" : tf == "30" ? "30 Minutes" : tf == "60" ? "1 Hour" : tf == "120" ? "2 Hours" : tf == "240" ? "4 Hours" : tf == "480" ? "8 Hours" : tf == "720" ? "12 Hours" : tf == "1D" or tf == "D" ? "Daily" : tf == "1W" or tf == "W" ? "Weekly" : tf == "1M" or tf == "M" ? "Monthly" : tf == "3M" ? "3 Months" : tf
+    result
+
+// Format large numbers
+formatVolume(vol) =>
+    result = vol >= 1000000000 ? str.tostring(vol / 1000000000, "#.##") + "B" : vol >= 1000000 ? str.tostring(vol / 1000000, "#.##") + "M" : vol >= 1000 ? str.tostring(vol / 1000, "#.##") + "K" : str.tostring(vol, "#")
+    result
+
+// Create progress bar
+createProgressBar(value, maxVal, isPositive) =>
+    pct = math.min(100, math.max(0, (value / maxVal) * 100))
+    filled = math.round(pct / 10)
+    empty = 10 - filled
+    col = isPositive ? volumeUpColor : volumeDownColor
+    bar = ""
+    for i = 0 to 9
+        bar := i < filled ? bar + "█" : bar + "░"
+    bar + " " + str.tostring(pct, "#") + "%"
+
+// ===== Pattern Detection Engine =====
+main(flg) =>
+    uTrd=maChk?close>ta.sma(close,maLen):true
+    dTrd=maChk?close<ta.sma(close,maLen):true
+    prc=string(na)
+    tim=int(na)
+    pt=string(na)
+    typ=string(na)
+    if flg
+        if bear and fallingThreeMethodsChk ? cp.fallingThreeMethods() and dTrd[4] : false
+            if na(pt)
+                pt:="Falling 3M", typ:="Bear"
+        if bull and risingThreeMethodsChk ? cp.risingThreeMethods() and uTrd[4] : false
+            if na(pt)
+                pt:="Rising 3M", typ:="Bull"
+        if bull and abandonedBabyChk ? cp.abandonedBaby("bull") and dTrd[2] : false
+            if na(pt)
+                pt:="Abandoned Baby", typ:="Bull"
+        if bear and abandonedBabyChk ? cp.abandonedBaby("bear") and uTrd[2] : false
+            if na(pt)
+                pt:="Abandoned Baby", typ:="Bear"
+        if bear and downsideTasukiGapChk ? cp.downsideTasukiGap() and dTrd : false
+            if na(pt)
+                pt:="Down Tasuki", typ:="Bear"
+        if bear and eveningDojiStarChk ? cp.eveningDojiStar() and uTrd : false
+            if na(pt)
+                pt:="Evening Doji", typ:="Bear"
+        if bear and eveningStarChk ? cp.eveningStar() and uTrd : false
+            if na(pt)
+                pt:="Evening Star", typ:="Bear"
+        if bull and morningDojiStarChk ? cp.morningDojiStar() and dTrd : false
+            if na(pt)
+                pt:="Morning Doji", typ:="Bull"
+        if bull and morningStarChk ? cp.morningStar() and dTrd : false
+            if na(pt)
+                pt:="Morning Star", typ:="Bull"
+        if bear and threeBlackCrowsChk ? cp.threeBlackCrows() : false
+            if na(pt)
+                pt:="3 Black Crows", typ:="Bear"
+        if bull and threeWhiteSoldiersChk ? cp.threeWhiteSoldiers() : false
+            if na(pt)
+                pt:="3 White Soldiers", typ:="Bull"
+        if bear and triStarChk ? cp.triStar("bear") and uTrd[2] : false
+            if na(pt)
+                pt:="Tri Star", typ:="Bear"
+        if bull and triStarChk ? cp.triStar("bull") and dTrd[2] : false
+            if na(pt)
+                pt:="Tri Star", typ:="Bull"
+        if bull and upsideTasukiGapChk ? cp.upsideTasukiGap() and uTrd : false
+            if na(pt)
+                pt:="Up Tasuki", typ:="Bull"
+        if bear and dbarkCloudCoverChk ? cp.darkCloudCover() and uTrd[1] : false
+            if na(pt)
+                pt:="Dark Cloud", typ:="Bear"
+        if bear and dojiStarChk ? cp.dojiStar("bear") and uTrd : false
+            if na(pt)
+                pt:="Doji Star", typ:="Bear"
+        if bull and dojiStarChk ? cp.dojiStar("bull") and dTrd : false
+            if na(pt)
+                pt:="Doji Star", typ:="Bull"
+        if bull and engulfingChk ? cp.engulfing("bull") and dTrd : false
+            if na(pt)
+                pt:="Engulfing", typ:="Bull"
+        if bear and engulfingChk ? cp.engulfing("bear") and uTrd : false
+            if na(pt)
+                pt:="Engulfing", typ:="Bear"
+        if bear and fallingWindowChk ? cp.fallingWindow() and dTrd[1] : false
+            if na(pt)
+                pt:="Falling Window", typ:="Bear"
+        if bull and haramiCrossChk ? cp.haramiCross("bull") and dTrd[1] : false
+            if na(pt)
+                pt:="Harami Cross", typ:="Bull"
+        if bear and haramiCrossChk ? cp.haramiCross("bear") and uTrd[1] : false
+            if na(pt)
+                pt:="Harami Cross", typ:="Bear"
+        if bull and haramiChk ? cp.harami("bull") and dTrd[1] : false
+            if na(pt)
+                pt:="Harami", typ:="Bull"
+        if bear and haramiChk ? cp.harami("bear") and uTrd[1] : false
+            if na(pt)
+                pt:="Harami", typ:="Bear"
+        if bull and kickingChk ? cp.kicking("bull") : false
+            if na(pt)
+                pt:="Kicking", typ:="Bull"
+        if bear and kickingChk ? cp.kicking("bear") : false
+            if na(pt)
+                pt:="Kicking", typ:="Bear"
+        if bear and onNeckChk ? cp.onNeck() and dTrd : false
+            if na(pt)
+                pt:="On Neck", typ:="Bear"
+        if bull and piercingChk ? cp.piercing() and dTrd[1] : false
+            if na(pt)
+                pt:="Piercing", typ:="Bull"
+        if bull and risingWindowChk ? cp.risingWindow() and uTrd[1] : false
+            if na(pt)
+                pt:="Rising Window", typ:="Bull"
+        if bull and tweezerBottomChk ? cp.tweezerBottom() and dTrd[1] : false
+            if na(pt)
+                pt:="Tweezer Bottom", typ:="Bull"
+        if bear and tweezerTopChk ? cp.tweezerTop() and uTrd[1] : false
+            if na(pt)
+                pt:="Tweezer Top", typ:="Bear"
+        if dojiChk ? cp.doji() : false
+            if na(pt)
+                pt:="Doji", typ:="Neutral"
+        if bull and dragonflyDojiChk ? cp.dragonflyDoji() : false
+            if na(pt)
+                pt:="Dragonfly Doji", typ:="Bull"
+        if bear and gravestoneDojiChk ? cp.gravestoneDoji() : false
+            if na(pt)
+                pt:="Gravestone Doji", typ:="Bear"
+        if bull and hammerChk ? cp.hammer() and dTrd : false
+            if na(pt)
+                pt:="Hammer", typ:="Bull"
+        if bear and hangingManChk ? cp.hangingMan() and uTrd : false
+            if na(pt)
+                pt:="Hanging Man", typ:="Bear"
+        if bull and invertedHammerChk ? cp.invertedHammer() and dTrd : false
+            if na(pt)
+                pt:="Inverted Hammer", typ:="Bull"
+        if bull and longLowerShadowChk ? cp.longLowerShadow() : false
+            if na(pt)
+                pt:="Long Lower Shadow", typ:="Bull"
+        if bear and longUpperShadowChk ? cp.longUpperShadow() : false
+            if na(pt)
+                pt:="Long Upper Shadow", typ:="Bear"
+        if bear and marubozuBlackChk ? cp.marubozuBlack() : false
+            if na(pt)
+                pt:="Marubozu Black", typ:="Bear"
+        if bull and marubozuWhiteChk ? cp.marubozuWhite() : false
+            if na(pt)
+                pt:="Marubozu White", typ:="Bull"
+        if bear and shootingStarChk ? cp.shootingStar() and uTrd : false
+            if na(pt)
+                pt:="Shooting Star", typ:="Bear"
+        if spinningTopBlackChk ? cp.spinningTopBlack() : false
+            if na(pt)
+                pt:="Spinning Top", typ:="Neutral"
+        if spinningTopWhiteChk ? cp.spinningTopWhite() : false
+            if na(pt)
+                pt:="Spinning Top", typ:="Neutral"
+        if barstate.isconfirmed and pt!=""
+            prc:=toStr(close), tim:=time
+    [prc, pt, tim, typ]
+
+// ===== Volume Analysis Function =====
+getVolumeData(tf) =>
+    buyVol = request.security(syminfo.tickerid, tf, close > open ? volume : 0)
+    sellVol = request.security(syminfo.tickerid, tf, close <= open ? volume : 0)
+    totalVol = request.security(syminfo.tickerid, tf, volume)
+    avgVol = request.security(syminfo.tickerid, tf, ta.sma(volume, volMaLen))
+    volRatio = avgVol > 0 ? totalVol / avgVol : 0
+    [buyVol, sellVol, totalVol, volRatio]
+
+// ===== Data Collection =====
+type Row
+    string tf
+    string prc
+    string pat
+    string typ
+    string tim
+    float buyVol
+    float sellVol
+    float volRatio
+    
+var rows = array.new<Row>(0)
+array.clear(rows)
+
+tfs = str.split(str.replace_all(tf_list_str, " ", ""), ",")
+for i = 0 to array.size(tfs) - 1
+    tf = array.get(tfs, i)
+    if str.length(tf) > 0
+        [prc_tf, pt_tf, tim_tf, typ_tf] = request.security(syminfo.tickerid, tf, main(true), calc_bars_count=maLen+5)
+        pr_close = toStr(request.security(syminfo.tickerid, tf, close))
+        [buyVol, sellVol, totalVol, volRatio] = getVolumeData(tf)
+        
+        if na(pt_tf)
+            array.push(rows, Row.new(tf, pr_close, "—", "—", timForm(time(tf)), buyVol, sellVol, volRatio))
+        else
+            array.push(rows, Row.new(tf, prc_tf, pt_tf, str.tostring(typ_tf), timForm(tim_tf), buyVol, sellVol, volRatio))
+
+// ===== Enhanced Table Display =====
+var table tbl = na
+
+if barstate.islast
+    if not na(tbl)
+        table.delete(tbl)
+    
+    // Calculate table dimensions
+    numCols = showVolume ? (showProgress ? 8 : 6) : 5
+    numRows = array.size(tfs) + 2
+    
+    // Adjust table size based on input
+    tblSize = tableSize == "Tiny" ? size.tiny : tableSize == "Small" ? size.small : tableSize == "Normal" ? size.normal : tableSize == "Large" ? size.large : tableSize == "Huge" ? size.huge : size.normal
+    
+    tbl := table.new(getPos(tablePos), numCols, numRows, frame_width=2, frame_color=borderCol, border_width=1, border_color=borderCol)
+    
+    // Title row with gradient effect
+    titleTxt = "🎯 " + syminfo.ticker + " Smart Pattern Scanner Pro™"
+    table.cell(tbl, 0, 0, titleTxt, text_color=titleText, bgcolor=titleBg, text_size=tblSize, text_halign=text.align_center)
+    table.merge_cells(tbl, 0, 0, numCols - 1, 0)
+    
+    // Header row
+    col = 0
+    table.cell(tbl, col, 1, "Timeframe", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+    col += 1
+    table.cell(tbl, col, 1, "Price", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+    col += 1
+    table.cell(tbl, col, 1, "Pattern", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+    col += 1
+    table.cell(tbl, col, 1, "Signal", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+    col += 1
+    
+    if showVolume
+        table.cell(tbl, col, 1, "Buy Vol", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+        col += 1
+        table.cell(tbl, col, 1, "Sell Vol", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+        col += 1
+        
+    if showProgress
+        table.cell(tbl, col, 1, "Vol Strength", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+        col += 1
+    
+    table.cell(tbl, col, 1, "Time", text_color=headerText, bgcolor=headerBg, text_size=tblSize, text_halign=text.align_center)
+    
+    // Data rows with alternating colors
+    r = 2
+    for row in rows
+        bg = (r % 2 == 0) ? rowBg1 : rowBg2
+        
+        // Determine signal color and symbol
+        signalColor = row.typ == "Bull" ? bullColor : row.typ == "Bear" ? bearColor : row.typ == "Neutral" ? neutralColor : color.gray
+        signalSymbol = row.typ == "Bull" ? "🟢 ▲" : row.typ == "Bear" ? "🔴 ▼" : row.typ == "Neutral" ? "🔵 ◆" : "⚪ —"
+        
+        col = 0
+        // Timeframe - Full name
+        tfDisplay = formatTimeframe(row.tf)
+        table.cell(tbl, col, r, tfDisplay, text_color=textColor, bgcolor=bg, text_size=tblSize, text_halign=text.align_center)
+        col += 1
+        
+        // Price - Make it more visible
+        table.cell(tbl, col, r, row.prc, text_color=color.white, bgcolor=bg, text_size=tblSize, text_halign=text.align_center, text_font_family=font.family_monospace)
+        col += 1
+        
+        // Pattern
+        patternBg = row.pat != "—" ? color.new(signalColor, 90) : bg
+        table.cell(tbl, col, r, row.pat, text_color=row.pat != "—" ? signalColor : color.gray, bgcolor=patternBg, text_size=tblSize, text_halign=text.align_center)
+        col += 1
+        
+        // Signal with symbol
+        table.cell(tbl, col, r, signalSymbol, text_color=signalColor, bgcolor=bg, text_size=tblSize, text_halign=text.align_center)
+        col += 1
+        
+        // Volume columns
+        if showVolume
+            buyVolStr = formatVolume(row.buyVol)
+            sellVolStr = formatVolume(row.sellVol)
+            
+            table.cell(tbl, col, r, buyVolStr, text_color=volumeUpColor, bgcolor=bg, text_size=tblSize, text_halign=text.align_center)
+            col += 1
+            
+            table.cell(tbl, col, r, sellVolStr, text_color=volumeDownColor, bgcolor=bg, text_size=tblSize, text_halign=text.align_center)
+            col += 1
+        
+        // Progress indicator
+        if showProgress
+            progressBar = createProgressBar(row.volRatio, 2, row.volRatio > 1)
+            progressColor = row.volRatio > 1.5 ? volumeUpColor : row.volRatio > 1 ? neutralColor : volumeDownColor
+            table.cell(tbl, col, r, progressBar, text_color=progressColor, bgcolor=bg, text_size=tblSize, text_halign=text.align_left)
+            col += 1
+        
+        // Time
+        table.cell(tbl, col, r, row.tim, text_color=color.rgb(180, 185, 190), bgcolor=bg, text_size=tblSize, text_halign=text.align_center)
+        
+        r += 1
+
+// ===== Alert System =====
+if array.size(rows) > 0
+    alertMsg = "🎯 Pattern Alert - " + syminfo.ticker + "\n"
+    patternFound = false
+    for i = 0 to array.size(rows) - 1
+        rw = array.get(rows, i)
+        if rw.pat != "—"
+            patternFound := true
+            alertMsg += "├ " + rw.tf + ": " + rw.pat + " (" + rw.typ + ") @ " + rw.prc + "\n"
+    
+    if patternFound
+        alert(alertMsg + "└─────────────", alert.freq_once_per_bar_close)

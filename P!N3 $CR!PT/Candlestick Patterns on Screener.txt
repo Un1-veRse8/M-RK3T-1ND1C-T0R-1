@@ -1,0 +1,501 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © MUQWISHI
+
+//@version=6
+indicator("All Candlestick Patterns on Screener [MUQWISHI]", "CP Screener [MUQWISHI]", overlay = true, dynamic_requests = true)
+import MUQWISHI/CandlestickPatterns/3 as cp
+import n00btraders/Timezone/1 as tz
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                               input                                        |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// +++++++ Table Settings
+var G0 = "Table Setting"
+// Location 
+tablePos = input.string("Top Right", "Table Location", 
+             ["Top Right", "Middle Right"  , "Bottom Right" , 
+             "Top Center", "Middle Center" , "Bottom Center", 
+             "Top Left"  , "Middle Left"   , "Bottom Left" ], 
+             display = display.none, inline = "1", group = G0)
+
+// Size
+tableSiz = input.int(10, " Size", display = display.none, inline = "1", group = G0)
+
+// Timezone
+var timzon = input.enum(tz.TimezoneDST.EXCHANGE, "Timezone   ", display = display.none, group = G0, inline = "2").tostring()
+
+// Number of rows
+rowNum = input.int(20, " № of Rows     ", 0, 100, display = display.none, group = G0, inline = "3")
+
+// Table Color
+tBgCol = input.color(#696969, "   Titles ‏ ‏", group = G0, inline = "2")
+txtCol = input.color(#ffffff, "   Text  ",  group = G0 , inline = "3")
+
+bulCol = input.color(#006400, "Bullish",    group = G0 , inline = "4")
+berCol = input.color(#882336, "  Bearish",  group = G0 , inline = "4")
+neuCol = input.color(#929191, "   Neutral", group = G0 , inline = "4")
+
+// +++++++ Technical Settings
+var G1 = "Technical"
+// Moving Average
+maChk   = input.bool(true, "Detect Trend Based on SMA", inline = "0", display = display.none, group = G1)
+maLen   = input.int(50, "", 1,                          inline = "0", display = display.none, group = G1)
+
+// +++++++ Candle Patterns
+var G2 = "Candle Patterns"
+
+// Type
+enum side
+    bull = "Bullish"
+    bear = "Bearish"
+    all  = "Both"
+ptrnTyp = input.enum(side.all, "Pattern Type", display = display.none, group = G2)
+
+// Patterns
+abandonedBabyChk       = input.bool(true, "Abandoned Baby",        group = G2, inline = "01") 
+dbarkCloudCoverChk     = input.bool(true, "Dark Cloud Cover",      group = G2, inline = "01") 
+dojiChk                = input.bool(true, "Doji",                  group = G2, inline = "02") 
+dojiStarChk            = input.bool(true, "Doji Star",             group = G2, inline = "02") 
+downsideTasukiGapChk   = input.bool(true, "Downside Tasuki Gap",   group = G2, inline = "02") 
+dragonflyDojiChk       = input.bool(true, "Dragonfly Doji",        group = G2, inline = "03") 
+engulfingChk           = input.bool(true, "Engulfing",             group = G2, inline = "03")
+eveningDojiStarChk     = input.bool(true, "Evening Doji Star",     group = G2, inline = "03") 
+eveningStarChk         = input.bool(true, "Evening Star",          group = G2, inline = "04") 
+fallingThreeMethodsChk = input.bool(true, "Falling Three Methods", group = G2, inline = "04") 
+fallingWindowChk       = input.bool(true, "Falling Window",        group = G2, inline = "05") 
+gravestoneDojiChk      = input.bool(true, "Gravestone Doji",       group = G2, inline = "05") 
+hammerChk              = input.bool(true, "Hammer",                group = G2, inline = "05") 
+hangingManChk          = input.bool(true, "Hanging Man",           group = G2, inline = "06") 
+haramiCrossChk         = input.bool(true, "Harami Cross",          group = G2, inline = "06") 
+haramiChk              = input.bool(true, "Harami",                group = G2, inline = "06")
+invertedHammerChk      = input.bool(true, "Inverted Hammer",       group = G2, inline = "07") 
+kickingChk             = input.bool(true, "Kicking",               group = G2, inline = "07") 
+longLowerShadowChk     = input.bool(true, "Long Lower Shadow",     group = G2, inline = "08") 
+longUpperShadowChk     = input.bool(true, "Long Upper Shadow",     group = G2, inline = "08") 
+marubozuBlackChk       = input.bool(true, "Marubozu Black",        group = G2, inline = "09") 
+marubozuWhiteChk       = input.bool(true, "Marubozu White",        group = G2, inline = "09") 
+morningDojiStarChk     = input.bool(true, "Morning Doji Star",     group = G2, inline = "10") 
+morningStarChk         = input.bool(true, "Morning Star",          group = G2, inline = "10") 
+onNeckChk              = input.bool(true, "On Neck",               group = G2, inline = "10") 
+piercingChk            = input.bool(true, "Piercing",              group = G2, inline = "11") 
+risingThreeMethodsChk  = input.bool(true, "Rising Three Methods",  group = G2, inline = "11") 
+risingWindowChk        = input.bool(true, "Rising Window",         group = G2, inline = "12") 
+shootingStarChk        = input.bool(true, "Shooting Star ",        group = G2, inline = "12") 
+spinningTopBlackChk    = input.bool(true, "Spinning Top Black",    group = G2, inline = "13") 
+spinningTopWhiteChk    = input.bool(true, "Spinning Top White",    group = G2, inline = "13") 
+threeBlackCrowsChk     = input.bool(true, "Three Black Crows",     group = G2, inline = "14") 
+threeWhiteSoldiersChk  = input.bool(true, "Three White Soldiers",  group = G2, inline = "14") 
+triStarChk             = input.bool(true, "Tri-Star",              group = G2, inline = "15") 
+tweezerBottomChk       = input.bool(true, "Tweezer Bottom",        group = G2, inline = "15") 
+tweezerTopChk          = input.bool(true, "Tweezer Top",           group = G2, inline = "15") 
+upsideTasukiGapChk     = input.bool(true, "Upside Tasuki Gap",     group = G2, inline = "16") 
+
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                  SYMBOLS                                   |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+var G3 = "Symbols"
+// Symbols Checkmark
+c01 = input.bool(true,  "", group = G3, display = display.none, inline = "s01")
+c02 = input.bool(true,  "", group = G3, display = display.none, inline = "s02")
+c03 = input.bool(true,  "", group = G3, display = display.none, inline = "s03")
+c04 = input.bool(true,  "", group = G3, display = display.none, inline = "s04")
+c05 = input.bool(true,  "", group = G3, display = display.none, inline = "s05")
+c06 = input.bool(true,  "", group = G3, display = display.none, inline = "s06")
+c07 = input.bool(true,  "", group = G3, display = display.none, inline = "s07")
+c08 = input.bool(true,  "", group = G3, display = display.none, inline = "s08")
+c09 = input.bool(true,  "", group = G3, display = display.none, inline = "s09")
+c10 = input.bool(true,  "", group = G3, display = display.none, inline = "s10")
+c11 = input.bool(true,  "", group = G3, display = display.none, inline = "s11")
+c12 = input.bool(true,  "", group = G3, display = display.none, inline = "s12")
+c13 = input.bool(true,  "", group = G3, display = display.none, inline = "s13")
+c14 = input.bool(true,  "", group = G3, display = display.none, inline = "s14")
+c15 = input.bool(true,  "", group = G3, display = display.none, inline = "s15")
+c16 = input.bool(true,  "", group = G3, display = display.none, inline = "s16")
+c17 = input.bool(true,  "", group = G3, display = display.none, inline = "s17")
+c18 = input.bool(true,  "", group = G3, display = display.none, inline = "s18")
+c19 = input.bool(true,  "", group = G3, display = display.none, inline = "s19")
+c20 = input.bool(true,  "", group = G3, display = display.none, inline = "s20")
+c21 = input.bool(true,  "", group = G3, display = display.none, inline = "s21")
+c22 = input.bool(true,  "", group = G3, display = display.none, inline = "s22")
+c23 = input.bool(true,  "", group = G3, display = display.none, inline = "s23")
+c24 = input.bool(true,  "", group = G3, display = display.none, inline = "s24")
+c25 = input.bool(true,  "", group = G3, display = display.none, inline = "s25")
+c26 = input.bool(true,  "", group = G3, display = display.none, inline = "s26")
+c27 = input.bool(true,  "", group = G3, display = display.none, inline = "s27")
+c28 = input.bool(true,  "", group = G3, display = display.none, inline = "s28")
+c29 = input.bool(true,  "", group = G3, display = display.none, inline = "s29")
+c30 = input.bool(true,  "", group = G3, display = display.none, inline = "s30")
+c31 = input.bool(true,  "", group = G3, display = display.none, inline = "s31")
+c32 = input.bool(true,  "", group = G3, display = display.none, inline = "s32")
+c33 = input.bool(true,  "", group = G3, display = display.none, inline = "s33")
+c34 = input.bool(true,  "", group = G3, display = display.none, inline = "s34")
+c35 = input.bool(true,  "", group = G3, display = display.none, inline = "s35")
+c36 = input.bool(false, "", group = G3, display = display.none, inline = "s36")
+c37 = input.bool(false, "", group = G3, display = display.none, inline = "s37")
+c38 = input.bool(false, "", group = G3, display = display.none, inline = "s38")
+c39 = input.bool(false, "", group = G3, display = display.none, inline = "s39")
+c40 = input.bool(false, "", group = G3, display = display.none, inline = "s40")
+
+// Symbol Input
+s01 = input.symbol("QQQ",  "", group = G3, display = display.none, inline = "s01")
+s02 = input.symbol("TSLA", "", group = G3, display = display.none, inline = "s02")
+s03 = input.symbol("AAPL", "", group = G3, display = display.none, inline = "s03")
+s04 = input.symbol("META", "", group = G3, display = display.none, inline = "s04")
+s05 = input.symbol("AMZN", "", group = G3, display = display.none, inline = "s05")
+s06 = input.symbol("MSFT", "", group = G3, display = display.none, inline = "s06")
+s07 = input.symbol("NVDA", "", group = G3, display = display.none, inline = "s07")
+s08 = input.symbol("AMD",  "", group = G3, display = display.none, inline = "s08")
+s09 = input.symbol("OXY",  "", group = G3, display = display.none, inline = "s09")
+s10 = input.symbol("NIO",  "", group = G3, display = display.none, inline = "s10")
+s11 = input.symbol("RIVN", "", group = G3, display = display.none, inline = "s11")
+s12 = input.symbol("PYPL", "", group = G3, display = display.none, inline = "s12")
+s13 = input.symbol("PLUG", "", group = G3, display = display.none, inline = "s13")
+s14 = input.symbol("ZM",   "", group = G3, display = display.none, inline = "s14")
+s15 = input.symbol("AMC",  "", group = G3, display = display.none, inline = "s15")
+s16 = input.symbol("GME",  "", group = G3, display = display.none, inline = "s16")
+s17 = input.symbol("BABA", "", group = G3, display = display.none, inline = "s17")
+s18 = input.symbol("LCID", "", group = G3, display = display.none, inline = "s18")
+s19 = input.symbol("AAL",  "", group = G3, display = display.none, inline = "s19")
+s20 = input.symbol("RBLX", "", group = G3, display = display.none, inline = "s20")
+s21 = input.symbol("NFLX", "", group = G3, display = display.none, inline = "s21")
+s22 = input.symbol("XPEV", "", group = G3, display = display.none, inline = "s22")
+s23 = input.symbol("CCL",  "", group = G3, display = display.none, inline = "s23")
+s24 = input.symbol("BILI", "", group = G3, display = display.none, inline = "s24")
+s25 = input.symbol("UBER", "", group = G3, display = display.none, inline = "s25")
+s26 = input.symbol("GOOG", "", group = G3, display = display.none, inline = "s26")
+s27 = input.symbol("JNJ",  "", group = G3, display = display.none, inline = "s27")
+s28 = input.symbol("UNH",  "", group = G3, display = display.none, inline = "s28")
+s29 = input.symbol("V",    "", group = G3, display = display.none, inline = "s29")
+s30 = input.symbol("XOM",  "", group = G3, display = display.none, inline = "s30")
+s31 = input.symbol("JPM",  "", group = G3, display = display.none, inline = "s31")
+s32 = input.symbol("MA",   "", group = G3, display = display.none, inline = "s32")
+s33 = input.symbol("WMT",  "", group = G3, display = display.none, inline = "s33")
+s34 = input.symbol("CVX",  "", group = G3, display = display.none, inline = "s34")
+s35 = input.symbol("PFE",  "", group = G3, display = display.none, inline = "s35")
+s36 = input.symbol("HD",   "", group = G3, display = display.none, inline = "s36")
+s37 = input.symbol("BAC",  "", group = G3, display = display.none, inline = "s37")
+s38 = input.symbol("LLY",  "", group = G3, display = display.none, inline = "s38")
+s39 = input.symbol("KO",   "", group = G3, display = display.none, inline = "s39")
+s40 = input.symbol("SPCE", "", group = G3, display = display.none, inline = "s40")
+
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                CALCULATION                                 |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+var bull = not(ptrnTyp == side.bear)
+var bear = not(ptrnTyp == side.bull)
+
+toStr(x) =>
+    str.tostring(x, str.replace(str.tostring(syminfo.mintick), "1", "0"))
+
+main(flg) =>
+    uTrd = maChk ? close > ta.sma(close, maLen) : true
+    dTrd = maChk ? close < ta.sma(close, maLen) : true
+
+    prc = string(na), tim = int(na), pt  = string(na), typ = string(na)
+
+    if flg
+        if bear and fallingThreeMethodsChk ? cp.fallingThreeMethods() and dTrd[4] : false
+            if not na(pt)
+                pt := "Falling Three Methods", typ := "Bear"
+
+        if bear and fallingThreeMethodsChk ? cp.fallingThreeMethods() and dTrd[4] : false
+            if na(pt)
+                pt := "Falling Three Methods", typ := "Bear"
+
+        if bull and risingThreeMethodsChk ? cp.risingThreeMethods() and uTrd[4] : false
+            if na(pt)
+                pt := "Rising Three Methods", typ := "Bull"
+
+        if bull and abandonedBabyChk ? cp.abandonedBaby("bull") and dTrd[2] : false
+            if na(pt)
+                pt := "Abandoned Baby", typ := "Bull"
+
+        if bear and abandonedBabyChk ? cp.abandonedBaby("bear") and uTrd[2] : false
+            if na(pt)
+                pt := "Abandoned Baby", typ := "Bear"
+
+        if bear and downsideTasukiGapChk ? cp.downsideTasukiGap() and dTrd : false
+            if na(pt)
+                pt := "Downside Tasuki Gap", typ := "Bear"
+
+        if bear and eveningDojiStarChk ? cp.eveningDojiStar() and uTrd : false
+            if na(pt)
+                pt := "Evening Doji Star", typ := "Bear"
+
+        if bear and eveningStarChk ? cp.eveningStar() and uTrd : false
+            if na(pt)
+                pt := "Evening Star", typ := "Bear"
+
+        if bull and morningDojiStarChk ? cp.morningDojiStar() and dTrd : false
+            if na(pt)
+                pt := "Morning Doji Star", typ := "Bull"
+
+        if bull and morningStarChk ? cp.morningStar() and dTrd : false
+            if na(pt)
+                pt := "Morning Star", typ := "Bull"
+
+        if bear and threeBlackCrowsChk ? cp.threeBlackCrows() : false
+            if na(pt)
+                pt := "Three Black Crows", typ := "Bear"
+
+        if bull and threeWhiteSoldiersChk ? cp.threeWhiteSoldiers() : false
+            if na(pt)
+                pt := "Three White Soldiers", typ := "Bull"
+
+        if bear and triStarChk ? cp.triStar("bear") and uTrd[2] : false
+            if na(pt)
+                pt := "Tri Star", typ := "Bear"
+
+        if bull and triStarChk ? cp.triStar("bull") and dTrd[2] : false
+            if na(pt)
+                pt := "Tri Star", typ := "Bull"
+
+        if bull and upsideTasukiGapChk ? cp.upsideTasukiGap() and uTrd : false
+            if na(pt)
+                pt := "Upside Tasuki Gap", typ := "Bull"
+
+        if bear and dbarkCloudCoverChk ? cp.darkCloudCover() and uTrd[1] : false
+            if na(pt)
+                pt := "Dark Cloud Cover", typ := "Bear"
+
+        if bear and dojiStarChk ? cp.dojiStar("bear") and uTrd : false
+            if na(pt)
+                pt := "Doji Star", typ := "Bear"
+
+        if bull and dojiStarChk ? cp.dojiStar("bull") and dTrd : false
+            if na(pt)
+                pt := "Doji Star", typ := "Bull"
+
+        if bull and engulfingChk ? cp.engulfing("bull") and dTrd : false
+            if na(pt)
+                pt := "Engulfing", typ := "Bull"
+
+        if bear and engulfingChk ? cp.engulfing("bear") and uTrd : false
+            if na(pt)
+                pt := "Engulfing", typ := "Bear"
+
+        if bear and fallingWindowChk ? cp.fallingWindow() and dTrd[1] : false
+            if na(pt)
+                pt := "Falling Window", typ := "Bear"
+
+        if bull and haramiCrossChk ? cp.haramiCross("bull") and dTrd[1] : false
+            if na(pt)
+                pt := "Harami Cross", typ := "Bull"
+
+        if bear and haramiCrossChk ? cp.haramiCross("bear") and uTrd[1] : false
+            if na(pt)
+                pt := "Harami Cross", typ := "Bear"
+
+        if bull and haramiChk ? cp.harami("bull") and dTrd[1] : false
+            if na(pt)
+                pt := "Harami", typ := "Bull"
+
+        if bear and haramiChk ? cp.harami("bear") and uTrd[1] : false
+            if na(pt)
+                pt := "Harami", typ := "Bear"
+
+        if bull and kickingChk ? cp.kicking("bull") : false
+            if na(pt)
+                pt := "Kicking", typ := "Bull"
+
+        if bear and kickingChk ? cp.kicking("bear") : false
+            if na(pt)
+                pt := "Kicking", typ := "Bear"
+
+        if bear and onNeckChk ? cp.onNeck() and dTrd : false
+            if na(pt)
+                pt := "On Neck", typ := "Bear"
+
+        if bull and piercingChk ? cp.piercing() and dTrd[1] : false
+            if na(pt)
+                pt := "Piercing", typ := "Bull"
+
+        if bull and risingWindowChk ? cp.risingWindow() and uTrd[1] : false
+            if na(pt)
+                pt := "Rising Window", typ := "Bull"
+
+        if bull and tweezerBottomChk ? cp.tweezerBottom() and dTrd[1] : false
+            if na(pt)
+                pt := "Tweezer Bottom", typ := "Bull"
+
+        if bear and tweezerTopChk ? cp.tweezerTop() and uTrd[1] : false
+            if na(pt)
+                pt := "Tweezer Top", typ := "Bear"
+
+        if dojiChk ? cp.doji() : false
+            if na(pt)
+                pt := "Doji", typ := "Neutral"
+
+        if bull and dragonflyDojiChk ? cp.dragonflyDoji() : false
+            if na(pt)
+                pt := "Dragon Fly Doji", typ := "Bull"
+
+        if bear and gravestoneDojiChk ? cp.gravestoneDoji() : false
+            if na(pt)
+                pt := "Gravestone Doji", typ := "Bear"
+
+        if bull and hammerChk ? cp.hammer() and dTrd : false
+            if na(pt)
+                pt := "Hammer", typ := "Bull"
+
+        if bear and hangingManChk ? cp.hangingMan() and uTrd : false
+            if na(pt)
+                pt := "Hanging Man", typ := "Bear"
+
+        if bull and invertedHammerChk ? cp.invertedHammer() and dTrd : false
+            if na(pt)
+                pt := "Inverted Hammer", typ := "Bull"
+
+        if bull and longLowerShadowChk ? cp.longLowerShadow() : false
+            if na(pt)
+                pt := "Long Lower Shadow", typ := "Bull"
+
+        if bear and longUpperShadowChk ? cp.longUpperShadow() : false
+            if na(pt)
+                pt := "Long Upper Shadow", typ := "Bear"
+
+        if bear and marubozuBlackChk ? cp.marubozuBlack() : false
+            if na(pt)
+                pt := "Marubozu Black", typ := "Bear"
+
+        if bull and marubozuWhiteChk ? cp.marubozuWhite() : false
+            if na(pt)
+                pt := "Marubozu White", typ := "Bull"
+
+        if bear and shootingStarChk ? cp.shootingStar() and uTrd : false
+            if na(pt)
+                pt := "Shooting Star", typ := "Bear"
+
+        if spinningTopBlackChk ? cp.spinningTopBlack() : false
+            if na(pt)
+                pt := "Spinning Top Black", typ := "Neutral"
+
+        if spinningTopWhiteChk ? cp.spinningTopWhite() : false
+            if na(pt)
+                pt := "Spinning Top White", typ := "Neutral"
+
+
+        if barstate.isconfirmed 
+            if pt != ""
+                prc := toStr(close)
+                tim := time
+
+    [prc, pt, tim, typ]
+
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                  SCREENER                                  |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// Get Time Format 
+timForm(x) =>
+    not  timeframe.isintraday ?  str.format_time(x, "MM-dd-yyyy",           timzon) :
+         timeframe.isseconds  ?  str.format_time(x, "HH:mm:ss  MM-dd-yyyy", timzon) : 
+                                 str.format_time(x, "HH:mm  MM-dd-yyyy",    timzon)
+                          
+// Get Symbol Name
+symbol(s) => 
+    array.get(str.split(s, ":"), 1)
+
+// Set Up Matrix
+type pattern
+    string sym = na
+    string prc = na
+    string pat = na
+    string tim = na
+    string typ = na
+
+var patterns = array.new<pattern>(na)
+message = array.new<string>(na)
+
+// Screener Function
+method screenerFun(string sym, bool flg) =>
+    s = ticker.modify(sym, syminfo.session)
+    [prc, pt, tim, typ] = request.security(s, "", main(flg), calc_bars_count = maLen + 5)
+
+    if not na(pt) and tim == time
+        patterns.unshift(pattern.new(symbol(sym), prc, pt, timForm(tim), str.tostring(typ)))
+
+        if patterns.size() > rowNum
+            patterns.pop()
+    
+        // Collect Alert Messages
+        message.push(symbol(sym) + " - " + str.tostring(prc) + " - " + 
+             pt + " - " + (typ == "Bull" ? "Bullish" : typ == "Bear" ? "Bearish" : "N/A") + "\n")
+
+
+// Call Symbols
+screenerFun(s01, c01),  screenerFun(s02, c02),  screenerFun(s03, c03),  screenerFun(s04, c04),  
+screenerFun(s05, c05),  screenerFun(s06, c06),  screenerFun(s07, c07),  screenerFun(s08, c08),  
+screenerFun(s09, c09),  screenerFun(s10, c10),  screenerFun(s11, c11),  screenerFun(s12, c12),
+screenerFun(s13, c13),  screenerFun(s14, c14),  screenerFun(s15, c15),  screenerFun(s16, c16),
+screenerFun(s17, c17),  screenerFun(s18, c18),  screenerFun(s19, c19),  screenerFun(s20, c20),  
+screenerFun(s21, c21),  screenerFun(s22, c22),  screenerFun(s23, c23),  screenerFun(s24, c24),  
+screenerFun(s25, c25),  screenerFun(s26, c26),  screenerFun(s27, c27),  screenerFun(s28, c28),  
+screenerFun(s29, c29),  screenerFun(s30, c30),  screenerFun(s31, c31),  screenerFun(s32, c32),  
+screenerFun(s33, c33),  screenerFun(s34, c34),  screenerFun(s35, c35),  screenerFun(s36, c36),
+screenerFun(s37, c37),  screenerFun(s38, c38),  screenerFun(s39, c39),  screenerFun(s40, c40),
+
+// Alert 
+if message.size() > 0
+    msg = "" 
+    for i = 0 to message.size() - 1
+        msg += message.get(i) 
+    
+    if msg != ""
+        alert(msg, alert.freq_once_per_bar_close)
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                   TABLE                                    |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// Get Tbale Location & Size
+locNsze(x) => 
+    y   = str.split(str.lower(x), " ")
+    out = ""
+    for i = 0 to y.size() - 1
+        out += y.get(i)
+        if i != y.size() - 1
+            out +=  "_"
+    out
+
+// Create Table
+var table tbl = na 
+
+// Cells Functions
+cell(col, row, txt, color) => 
+    tbl.cell(col, row, txt, 0, 0, txtCol, bgcolor = color, text_size = tableSiz)
+
+bottom(j, txt1, txt2, txt3, txt4) =>
+    tbl.cell(0, j,  txt1, 0, 0.001,  color(na), bgcolor = color(na), text_size = tableSiz)
+    tbl.cell(1, j,  txt2, 0, 0.001,  color(na), bgcolor = color(na), text_size = tableSiz)
+    tbl.cell(2, j,  txt3, 0, 0.001,  color(na), bgcolor = color(na), text_size = tableSiz)
+    tbl.cell(3, j,  txt4, 0, 0.001,  color(na), bgcolor = color(na), text_size = tableSiz)
+
+
+if barstate.islast
+    tbl.delete()
+    tbl := table.new(locNsze(tablePos), 4, patterns.size() > 0 ? patterns.size() + 2 : 1,
+          frame_width  = 0, frame_color  = color.new(tBgCol, 25), 
+          border_width = 1, border_color = chart.bg_color)
+
+    cell(0, 0, "Symbol",      tBgCol)
+    cell(1, 0, "Price",       tBgCol)
+    cell(2, 0, "Pattern" ,    tBgCol)
+    cell(3, 0, "Signal Time", tBgCol)
+ 
+    j = 1
+    if patterns.size() > 0
+        for element in patterns
+            col = element.typ == "Bull" ? bulCol :
+                  element.typ == "Bear" ? berCol : neuCol
+
+            cell(0, j, element.sym , tBgCol)
+            cell(1, j, element.prc,     col)
+            cell(2, j, element.pat,     col)
+            cell(3, j, element.tim,     col)
+
+            j += 1
+    
+    bottom(j, "Symbol", "Price", "Falling Three Methods", "Signal Time")
+ 
+

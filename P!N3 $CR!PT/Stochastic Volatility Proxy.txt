@@ -1,0 +1,86 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © GabrielAmadeusLau
+
+//@version=6
+indicator("3/2 Stochastic Volatility Proxy", overlay = false)
+
+
+//== 2 Pole Butterworth Highpass Filter ==//
+butterworthHP(float Series, float Period) =>
+    var float ALPHA =  math.pi * math.sqrt(2.0) / Period
+    var float BETA  =  math.exp(-ALPHA )
+    var float COEF2 = -math.pow(BETA, 2)
+    var float COEF1 =  math.cos( ALPHA ) * 2.0 * BETA
+    var float COEF0 =  (1.0 + COEF1 - COEF2) * 0.25
+    float tmp    = nz(Series[1],  Series)
+    float whiten =    Series + nz(Series[2], tmp) - 2.0 * tmp 
+    float smooth = na, smooth := COEF0 *     whiten     +
+                                 COEF1 *  nz(smooth[1]) +
+                                 COEF2 *  nz(smooth[2])
+
+//===== 2 Pole Super Smoother Filter =====//
+superSmoother(float Series, float Period) =>
+    var float ALPHA =  math.pi * math.sqrt(2.0) / Period
+    var float BETA  =  math.exp(-ALPHA )
+    var float COEF2 = -math.pow(BETA, 2)
+    var float COEF1 =  math.cos( ALPHA ) * 2.0 * BETA
+    var float COEF0 =  1.0 - COEF1 - COEF2
+    float sma2   = math.avg(Series, nz(Series[1], Series))
+    float smooth = na, smooth := COEF0 *      sma2      +
+                                 COEF1 *  nz(smooth[1]) +
+                                 COEF2 *  nz(smooth[2])
+
+//===== Faster Root Mean Square =====//
+fastRMS(float Series, float Period) =>
+    if Period < 1
+        runtime.error("Err: fastRMS(Period=) is less than 1")
+    var float COEF0 = 2.0 / (Period + 1)
+    var float COEF1 = 1.0 -  COEF0
+    float pow = math.pow(Series, 2)
+    float ema = na, ema := COEF0 *    pow +
+                           COEF1 * nz(ema[1], pow)
+    nz(Series / math.sqrt(ema))
+
+//===== RMS Scaled Bandpass Filter =====//
+scaledFilt(source, int periodHP, int periodLP, int periodRMS) =>
+    float HP       = butterworthHP(source, periodHP )
+    float BPF      = superSmoother(   HP, periodLP )
+    float priceRMS =       fastRMS(  BPF, periodRMS)
+
+// Z-Score function
+f_zscore(series float src, int length) =>
+    mean = ta.sma(src, length)
+    stddev = ta.stdev(src, length)
+    z = (src - mean) / (stddev)
+    z
+
+// === Inputs ===
+length = input.int(14, title = "Lookback Period", minval = 1, group = "3/2 Stochastic Volatility Proxy")
+smoothing = input.int(20, title = "Smoothing Period", minval = 1, group = "3/2 Stochastic Volatility Proxy")
+zscore = input.bool(true, title = "Z-Score 🡆 Ehlers Loop", group = "3/2 Stochastic Volatility Proxy")
+
+// === Realized Volatility Proxy ===
+// Return = log(close / close[1])
+ret = math.log(close / close[1])
+vari = ta.sma(ret * ret, length)  // Realized variance
+
+// === 3/2 Power Transformation ===
+volatility_proxy = math.pow(vari, 1.5)
+
+// === Smoothing ===
+smoothed_vol = zscore ? f_zscore(volatility_proxy, smoothing) : scaledFilt(volatility_proxy, math.round(smoothing * 6.25), smoothing, math.round(smoothing * 4))
+
+// === Plot ===
+plot(smoothed_vol, title = "3/2 Volatility Proxy", color = color.orange, linewidth = 2)
+hline(0, color = color.gray, linestyle = hline.style_dotted)
+
+// === Alerts ===
+crossUp = ta.crossover(smoothed_vol, 0)
+crossDown = ta.crossunder(smoothed_vol, 0)
+aboveThreshold = smoothed_vol > 2.0
+belowThreshold = smoothed_vol < -2.0
+
+alertcondition(crossUp, title="Volatility Proxy Crosses Above 0", message="3/2 Volatility Proxy crossed above 0 — increasing volatility")
+alertcondition(crossDown, title="Volatility Proxy Crosses Below 0", message="3/2 Volatility Proxy crossed below 0 — decreasing volatility")
+alertcondition(aboveThreshold, title="Volatility Proxy Above 2σ", message="3/2 Volatility Proxy exceeds threshold of 2σ")
+alertcondition(belowThreshold, title="Volatility Proxy Below -2σ", message="3/2 Volatility Proxy below the threshold of -2σ")

@@ -1,0 +1,296 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © BackQuant
+
+//@version=6
+indicator(
+ "Seasonality Monte Carlo Forecaster [BackQuant]",
+ max_labels_count = 500,
+ max_lines_count = 500, 
+ max_boxes_count = 500, 
+ overlay = true
+ )
+
+// Define Groups
+const string simulation = "Monte Carlo Simulation"
+const string historical = "Historical Analysis"
+const string plots = "Plotting"
+const string ui = "UI Settings"
+// Define tooltips
+const string source_tt                   = "Select the price series to run the Monte Carlo simulation on."
+const string enable_forecasts_tt         = "Toggle to enable or disable Monte Carlo probability forecast generation."
+const string simulation_runs_tt          = "Number of Monte Carlo simulation iterations to perform."
+const string forecast_horizon_tt         = "Number of future days to project in the simulation."
+const string confidence_levels_tt        = "Choose which probability bands to display on the chart."
+const string custom_confidence_tt        = "Custom confidence level percentage for the probability bands."
+
+const string seasonal_mode_tt            = "Select the seasonal pattern resolution: daily or weekly."
+const string volatility_adjustment_tt    = "Scale simulation results according to recent volatility."
+
+const string show_probability_cone_tt    = "Display the probability cone showing forecast uncertainty."
+const string show_mean_projection_tt     = "Display the mean expected price path from simulations."
+const string show_historical_overlay_tt  = "Overlay historical seasonal patterns on the chart."
+
+const string forecast_transparency_tt    = "Transparency level for probability bands."
+const string primary_forecast_color_tt   = "Color used for the outer (e.g., 95%) forecast bands."
+const string secondary_forecast_color_tt = "Color used for the inner (e.g., 68%) forecast bands."
+const string mean_path_color_tt          = "Color used for the expected mean price path."
+
+// User Inputs 
+float   source                   = input.source(close, "Price Series for Calculation",  group = simulation, tooltip = source_tt)
+bool    enable_forecasts         = input.bool(true, "Enable Probability Forecasts", group = simulation, tooltip = enable_forecasts_tt)
+int     simulation_runs          = input.int(100, "Simulation Iterations", minval = 1, maxval = 10000, group = simulation, tooltip = simulation_runs_tt)
+int     forecast_horizon         = input.int(30, "Forecast Days Ahead", minval = 5, group = simulation, tooltip = forecast_horizon_tt)
+string  confidence_levels        = input.string('All Bands', "Probability Bands", ['All Bands', '95% Only', '68% Only', 'Custom'], group = simulation, tooltip = confidence_levels_tt)
+float   custom_confidence        = input.float(80.0, "Custom Confidence %", minval = 50.0, maxval = 99.0, group = simulation, tooltip = custom_confidence_tt)
+
+string  seasonal_mode            = input.string('Daily', "Pattern Resolution", ['Daily', 'Weekly'], group = historical, tooltip = seasonal_mode_tt)
+bool    volatility_adjustment    = input.bool(true, "Volatility Scaling", group = historical, tooltip = volatility_adjustment_tt)
+
+bool    show_probability_cone    = input.bool(true, "Probability Cone", group = plots, tooltip = show_probability_cone_tt)
+bool    show_mean_projection     = input.bool(true, "Expected Path", group = plots, tooltip = show_mean_projection_tt)
+bool    show_historical_overlay  = input.bool(false, "Historical Overlay", group = plots, tooltip = show_historical_overlay_tt)
+
+int     forecast_transparency    = input.int(50, "Band Transparency", group = ui, tooltip = forecast_transparency_tt)
+color   mean_path_color          = input.color(#0000ff, "Expected Path", group = ui, tooltip = mean_path_color_tt)
+color   primary_forecast_color   = input.color(#00ff00, "Primary Forecast", group = ui, tooltip = primary_forecast_color_tt, inline = "1")
+color   secondary_forecast_color = input.color(#ff0000, "Secondary Forecast", group = ui, tooltip = secondary_forecast_color_tt, inline = "1")
+
+// Declare Data Structures 
+var historical_returns = array.new_float()
+var daily_patterns = array.new_float()
+var volatility_patterns = array.new_float()
+var simulation_results = array.new_float()
+
+var series int yearly_start_index = na
+var series int current_day_of_year = na
+var series int base_year = na
+
+
+current_volatility = ta.atr(20) / source
+
+// Initialize year tracking and calculate day of year manually
+if na(yearly_start_index)
+    yearly_start_index := bar_index
+    base_year := year
+
+// Calculate day of year manually using month and day
+days_in_months = array.from(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+current_day_of_year := 0
+if month > 1
+    for i = 0 to month - 2
+        current_day_of_year += days_in_months.get(i)
+current_day_of_year += dayofmonth
+
+// Add leap year adjustment
+is_leap_year = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+if is_leap_year and month > 2
+    current_day_of_year += 1
+
+// Pattern Recognition Engine 
+pattern_discovery() =>
+    if not na(source) and not na(source[1]) and barstate.isconfirmed
+        
+        daily_return = math.log((source / source[1])) 
+        daily_volatility = math.abs(daily_return)
+        
+        // Store patterns, use modulo to cycle through year
+        pattern_index = current_day_of_year % 365
+        if historical_returns.size() <= pattern_index
+            while historical_returns.size() <= pattern_index
+                historical_returns.push(0.0)
+                volatility_patterns.push(0.01)
+        
+        // Update running average for this day of year
+        existing_return = historical_returns.get(pattern_index)
+        updated_return = existing_return * 0.9 + daily_return * 0.1
+        historical_returns.set(pattern_index, updated_return)
+        
+        existing_vol = volatility_patterns.get(pattern_index)
+        updated_vol = existing_vol * 0.9 + daily_volatility * 0.1
+        volatility_patterns.set(pattern_index, updated_vol)
+
+// Monte Carlo Simulation
+    // Helper Functions
+// Gaussian random number generator (Box-Muller transform)
+gauss_random(mean_val, std_val, seed_val) =>
+    r1 = math.random(0.01, 0.99, seed_val)
+    r2 = math.random(0.01, 0.99, seed_val + 100)
+    z = math.sqrt(-2.0 * math.log(r1)) * math.cos(2.0 * math.pi * r2)
+    mean_val + std_val * z
+
+// Bootstrap sampling from historical patterns
+bootstrap_sample(returns_array, seed_val) =>
+    if returns_array.size() > 0
+        random_index = math.round(math.random(0, returns_array.size() - 1, seed_val))
+        returns_array.get(random_index)
+    else
+        0.0
+
+monte_carlo_forecast(start_price, days_ahead) =>
+    var simulation_matrix = matrix.new<float>(100, days_ahead + 1, 0.0)
+    
+    // Only run if we have enough historical data
+    if historical_returns.size() < 30
+        simulation_matrix
+    else
+        // Calculate statistics from historical patterns
+        mean_return = historical_returns.sum() / historical_returns.size()
+        std_return = historical_returns.stdev()
+        
+        // Limit simulations for performance
+        actual_sims = math.min(simulation_runs, 100)
+        
+        // Run Monte Carlo simulations
+        for sim = 0 to actual_sims - 1
+            current_price = start_price
+            simulation_matrix.set(sim, 0, current_price)
+            
+            // Generate path for each day ahead
+            for day = 0 to days_ahead
+                // Get seasonal bias for this day
+                pattern_index = (current_day_of_year + day - 1) % historical_returns.size()
+                seasonal_bias = historical_returns.get(pattern_index)
+                
+                // Generate random return using seasonal bias
+                sim_ret = 0.0
+                seed_val = sim * 10000 + day * 137
+                
+                if seasonal_mode == 'Daily'
+                    // Use Gaussian distribution with seasonal bias
+                    sim_ret := gauss_random(seasonal_bias, std_return * 0.5, seed_val)
+                else
+                    // Bootstrap from historical data
+                    sim_ret := bootstrap_sample(historical_returns, seed_val) + seasonal_bias * 0.3
+                
+                // Apply volatility scaling
+                vol_scaling = volatility_adjustment ? math.max(0.5, math.min(2.0, current_volatility / 0.02)) : 1.0
+                sim_ret *= vol_scaling
+                
+                // Update price
+                current_price := current_price * math.exp(sim_ret)
+                matrix.set(simulation_matrix, sim, day, current_price)
+        
+        simulation_matrix
+
+// Calculate Probability Bands
+calculate_percentiles(simulation_matrix, day_index) =>
+    if simulation_matrix.rows() > 0 and day_index < simulation_matrix.columns()
+        var day_values = array.new_float()
+        day_values.clear()
+        
+        // Extract all simulation values for this day
+        for sim = 0 to simulation_matrix.rows() - 1
+            price_value = simulation_matrix.get(sim, day_index)
+            day_values.push(price_value)
+        
+        // Sort for percentile calculation
+        day_values.sort()
+        total_values = day_values.size()
+        
+        if total_values > 0
+            p5 = day_values.get(math.max(0, math.round(total_values * 0.05) - 1))
+            p16 = day_values.get(math.max(0, math.round(total_values * 0.16) - 1))
+            p50 = day_values.get(math.max(0, math.round(total_values * 0.50) - 1))
+            p84 = day_values.get(math.min(total_values - 1, math.round(total_values * 0.84)))
+            p95 = day_values.get(math.min(total_values - 1, math.round(total_values * 0.95)))
+            
+            [p5, p16, p50, p84, p95]
+        else
+            [na, na, na, na, na]
+    else
+        [na, na, na, na, na]
+
+// Probability Bands
+draw_probability_cone(simulation_matrix, start_bar, start_price) =>
+    if show_probability_cone and simulation_matrix.rows() > 0
+        
+        // Create arrays for confidence band points
+        var p5_points = array.new<chart.point>()
+        var p16_points = array.new<chart.point>()
+        var p50_points = array.new<chart.point>()
+        var p84_points = array.new<chart.point>()
+        var p95_points = array.new<chart.point>()
+        
+        p5_points.clear()
+        p16_points.clear() 
+        p50_points.clear()
+        p84_points.clear()
+        p95_points.clear()
+        
+        // Calculate percentiles for each day
+        for day = 0 to math.min(forecast_horizon, simulation_matrix.columns() - 1)
+            [p5, p16, p50, p84, p95] = calculate_percentiles(simulation_matrix, day)
+            
+            if not na(p50)
+                bar_x = start_bar + day
+                p5_points.push(chart.point.from_index(bar_x, p5))
+                p16_points.push(chart.point.from_index(bar_x, p16))
+                p50_points.push(chart.point.from_index(bar_x, p50))
+                p84_points.push(chart.point.from_index(bar_x, p84))
+                p95_points.push(chart.point.from_index(bar_x, p95))
+        
+        // Draw confidence bands
+        if confidence_levels == 'All Bands' or confidence_levels == '95% Only'
+            polyline.new(p5_points, line_color=color.new(primary_forecast_color, forecast_transparency), line_width=1)
+            polyline.new(p95_points, line_color=color.new(primary_forecast_color, forecast_transparency), line_width=1)
+        
+        if confidence_levels == 'All Bands' or confidence_levels == '68% Only'
+            polyline.new(p16_points, line_color=color.new(secondary_forecast_color, forecast_transparency), line_width=1)
+            polyline.new(p84_points, line_color=color.new(secondary_forecast_color, forecast_transparency), line_width=1)
+        
+        if show_mean_projection
+            polyline.new(p50_points, line_color=mean_path_color, line_width=2)
+
+// Call Function
+pattern_discovery()
+
+if barstate.islastconfirmedhistory and enable_forecasts
+    if historical_returns.size() > 30
+        // Run Monte Carlo simulation
+        forecast_matrix = monte_carlo_forecast(source, forecast_horizon)
+        
+        // Visualize results
+        if forecast_matrix.rows() > 0
+            draw_probability_cone(forecast_matrix, bar_index + 1, source)
+            
+            [p5_final, p16_final, median_final, p84_final, p95_final] = calculate_percentiles(forecast_matrix, forecast_horizon - 1)
+            
+            if not na(median_final)
+                expected_return = (median_final - source) / source * 100
+                confidence_range = (p95_final - p5_final) / source * 100
+                // Table
+                var info = table.new(position.top_right, 2, 6, 
+                     bgcolor = color.new(#000000, 100), 
+                     border_color = color.white, 
+                     frame_color = color.white, frame_width = 1, border_width = 1 
+                     )
+                
+                info.cell(0, 0, "Simulations:", text_color = color.white)
+                info.cell(1, 0, str.tostring(math.min(simulation_runs, 100)), text_color = color.white)
+                info.cell(0, 1, "Forecast Days:", text_color = color.white)
+                info.cell(1, 1, str.tostring(forecast_horizon), text_color = color.white)
+                info.cell(0, 2, "Historical Data:", text_color = color.white)
+                info.cell(1, 2, str.tostring(historical_returns.size()) + " patterns", text_color = color.white)
+                info.cell(0, 3, "Current Day:", text_color = color.white)
+                info.cell(1, 3, str.tostring(current_day_of_year) + "/365", text_color = color.white)
+                info.cell(0, 4, "Expected Returns:", text_color = color.white)
+                info.cell(1, 4, str.tostring(expected_return, "#.##") + "%", text_color= color.white)
+                info.cell(0, 5, "95% Range ±", text_color = color.white)
+                info.cell(1, 5, str.tostring(confidence_range/2, "#.##") + "%", text_color = color.white)
+
+//
+if show_historical_overlay and historical_returns.size() > 30
+    // Plot historical seasonal pattern as reference
+    historical_projection = source
+    for i = 1 to math.min(30, 365 - current_day_of_year)
+        pattern_idx = (current_day_of_year + i) % historical_returns.size()
+        if pattern_idx < historical_returns.size()
+            expected_return = historical_returns.get(pattern_idx)
+            new_projection = historical_projection * (1 + expected_return)
+            
+            line.new(bar_index + i - 1, historical_projection, 
+                     bar_index + i, new_projection, 
+                     color = color.new(#0000ff, 40), width = 1, style = line.style_dotted)
+            
+            historical_projection := new_projection
+

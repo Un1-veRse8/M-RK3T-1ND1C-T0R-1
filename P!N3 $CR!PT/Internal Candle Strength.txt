@@ -1,0 +1,61 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © LuxAlgo
+
+//@version=6
+indicator('Internal Candle Strength [LuxAlgo]', 'LuxAlgo - Internal Candle Strength', overlay=true, max_lines_count = 500, max_boxes_count = 500)
+//---------------------------------------------------------------------------------------------------------------------}
+// Settings
+//---------------------------------------------------------------------------------------------------------------------{
+timeframeInput  = input.timeframe(  '1',  'Timeframe')
+sizeInput       = input(            20.,  'Row Size')
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Functions
+//---------------------------------------------------------------------------------------------------------------------{
+ohlc()=> [open, high, low, close]
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Variables & Execution
+//---------------------------------------------------------------------------------------------------------------------{
+n             = bar_index
+idx           = math.max(math.round((high - low) / sizeInput), 1)
+[o, h, l, c]  = request.security_lower_tf(syminfo.tickerid, timeframeInput, ohlc())
+
+min           = low
+max           = low
+float avg     = na 
+color css     = na
+
+for i = 0 to idx-1
+    max += (high - low) / idx
+    num = array.new<float>()
+    den = array.new<float>()
+
+    for [index, value] in o
+        if array.get(h, index) > min and array.get(l, index) < max
+            diff = array.get(c, index) - array.get(o, index)
+
+            array.push(num, diff)
+            array.push(den, math.abs(diff))
+
+    strength  = 50 * (array.sum(num) / array.sum(den)) + 50
+    css       := color.from_gradient(strength, 0, 100, color.red, color.teal)
+
+    box.new(n, max, n+1, min
+      , text = str.tostring(strength, format.percent)
+      , text_color = css
+      , bgcolor = color.new(#5d606b, 80)
+      , border_color = na)
+
+    line.new(n, min, n+1, min, color = css)    
+    
+    min := max
+
+line.new(n, min, n+1, min, color = css)
+
+plotcandle(open, math.max(close, open), math.min(close, open), open
+  , bordercolor = #00000000
+  , color = #00000000
+  , wickcolor = close > open ? color.teal : color.red)
+
+//---------------------------------------------------------------------------------------------------------------------}
