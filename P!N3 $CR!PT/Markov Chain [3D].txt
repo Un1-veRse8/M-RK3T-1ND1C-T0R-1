@@ -930,45 +930,7 @@ if barstate.islast
 // 📊 DATA WINDOW OUTPUT
 // ═══════════════════════════════════════════════════════════════════════════
 // Export current market state to data window for external analysis
-// Color-coded output: Green (Bull), Red (Bear), Gray (Neutral)
-plot(market_state, "Current Market State", color=market_state == 1 ? bull_color : market_state == -1 ? bear_color : neutral_color, linewidth=2,display = display.data_window)
-
-// What exactly is a Markov Chain?
-
-// This indicator uses a Markov Chain model to analyze, quantify, and visualize the transitions between market regimes (Bull, Bear, Neutral) on your chart.
-// It dynamically detects these regimes in real-time, calculates transition probabilities, and displays them as animated 3D spheres and arrows, giving traders intuitive insight into current and future market conditions.
-
-// snapshot
-
-// How does a Markov Chain work, and how should I read this spheres-and-arrows diagram?
-
-// Think of three weather modes: Sunny, Rainy, Cloudy.
-// Each sphere is one mode.
-// The loop on a sphere means “stay the same next step” (e.g., Sunny again tomorrow).
-// The arrows leaving a sphere show where things usually go next if they change (e.g., Sunny moving to Cloudy).
-// Some paths matter more than others.
-// A more prominent loop means the current mode tends to persist.
-// A more prominent outgoing arrow means a change to that destination is the usual next step.
-// Direction isn’t symmetric: moving Sunny→Cloudy can behave differently than Cloudy→Sunny.
-
-// Now relabel the spheres to markets: Bull, Bear, Neutral.
-
-// Spheres: market regimes (uptrend, downtrend, range).
-// Self‑loop: tendency for the current regime to continue on the next bar.
-// Arrows: the most common next regime if a switch happens.
-
-// How to read: Start at the sphere that matches current bar state.
-// If the loop stands out, expect continuation.
-// If one outgoing path stands out, that switch is the typical next step.
-// Opposite directions can differ (Bear→Neutral doesn’t have to match Neutral→Bear).
-
-// snapshot
-
-// What states and transitions are shown?
-
-// The three market states visualized are:
-// Bullish (Bull): Upward or strong-market regime.
-// Bearish (Bear): Downward or weak-market regime.
-// Neutral: Sideways or range-bound regime.
-
-// Bidirectional animated arrows and probability labels show how likely the market is to move from one regime to another (e.g., Bull → Bear or Neutral → Bull).
+color regime_color = market_state == 1 ? bull_color : market_state == -1 ? bear_color : neutral_color
+plot(market_state, "Current Market State", regime_color, linewidth=2,display = display.data_window, editable = false)
+// Plot market regime on candles
+plotcandle(open,high,low,close,"Regime state",regime_color,regime_color, force_overlay = true,editable = true,display = display.none)
